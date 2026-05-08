@@ -1,6 +1,6 @@
 import axios, { AxiosInstance, InternalAxiosRequestConfig } from "axios";
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "http://localhost:8080";
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "https://lumiere-admin-web-hazel.vercel.app";
 
 const axiosInstance: AxiosInstance = axios.create({
   baseURL: API_BASE_URL,
