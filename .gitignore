@@ -1,0 +1,27 @@
+# dependencies
+node_modules
+
+# build output
+dist
+dist-ssr
+
+# local env files
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# logs
+*.log
+
+# misc
+.DS_Store
+Thumbs.db
+*.pem
+
+# typescript
+*.tsbuildinfo
+
+# vercel
+.vercel
