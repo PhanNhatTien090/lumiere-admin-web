@@ -543,32 +543,55 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
 }
 
 // ─── History Screen ─────────────────────────────────────────────────────────────
+const HISTORY_PAGE_SIZES = [10, 20, 50];
+
 function HistoryScreen() {
   const { staff } = useAdminStore();
   const [orders, setOrders] = useState<OrderResponse[]>([]);
+  const [page, setPage] = useState(0);
+  const [size, setSize] = useState(20);
+  const [totalElements, setTotalElements] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = async () => {
+  const load = useCallback(async (nextPage: number, nextSize: number) => {
     setLoading(true); setError(null);
     try {
-      const res = await orderAPI.listOrders("PAID");
-      setOrders(res.data.data);
+      const res = await orderAPI.listOrdersPaged({ status: "PAID", page: nextPage, size: nextSize });
+      const data = res.data.data;
+      setOrders(data.content);
+      setPage(data.page);
+      setSize(data.size);
+      setTotalElements(data.totalElements);
+      setTotalPages(data.totalPages);
     } catch (e: any) {
       setError(e.response?.data?.message || "Lỗi tải lịch sử");
     } finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(0, size); }, [load, size]);
+
+  const goToPage = (target: number) => {
+    if (target < 0 || target >= totalPages || target === page) return;
+    void load(target, size);
   };
 
-  useEffect(() => { load(); }, []);
+  const showingFrom = totalElements === 0 ? 0 : page * size + 1;
+  const showingTo = Math.min((page + 1) * size, totalElements);
 
   return (
     <div className="screen">
       <header className="screen-header">
         <div>
           <h2>Lịch sử <span>Giao dịch</span></h2>
-          <p>{orders.length} đơn đã thanh toán</p>
+          <p>
+            {totalElements > 0
+              ? `Hiển thị ${showingFrom}–${showingTo} / ${totalElements} đơn đã thanh toán`
+              : "Chưa có giao dịch"}
+          </p>
         </div>
-        <button className="btn-secondary" onClick={load}>🔄 Làm mới</button>
+        <button className="btn-secondary" onClick={() => void load(page, size)}>🔄 Làm mới</button>
       </header>
 
       {error && <div className="alert-error">{error}</div>}
@@ -624,6 +647,50 @@ function HistoryScreen() {
           </tbody>
         </table>
       </div>
+
+      {totalPages > 0 && (
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            marginTop: 14,
+            gap: 10,
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 8, color: "#6b7280", fontSize: 13 }}>
+            <span>Số dòng / trang:</span>
+            <select
+              value={size}
+              disabled={loading}
+              onChange={(e) => { setSize(Number(e.target.value)); }}
+              style={{ padding: "4px 8px", borderRadius: 6, border: "1px solid #d1d5db" }}
+            >
+              {HISTORY_PAGE_SIZES.map((s) => (
+                <option key={s} value={s}>{s}</option>
+              ))}
+            </select>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <button className="btn-small" disabled={loading || page === 0} onClick={() => goToPage(0)}>
+              ⏮
+            </button>
+            <button className="btn-small" disabled={loading || page === 0} onClick={() => goToPage(page - 1)}>
+              ◀
+            </button>
+            <span style={{ padding: "0 10px", fontSize: 13, color: "#374151" }}>
+              Trang <b>{page + 1}</b> / {totalPages}
+            </span>
+            <button className="btn-small" disabled={loading || page >= totalPages - 1} onClick={() => goToPage(page + 1)}>
+              ▶
+            </button>
+            <button className="btn-small" disabled={loading || page >= totalPages - 1} onClick={() => goToPage(totalPages - 1)}>
+              ⏭
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

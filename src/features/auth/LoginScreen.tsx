@@ -41,9 +41,9 @@ export function LoginScreen() {
           <p>MANAGEMENT PORTAL</p>
           <div className="hero-image" />
           <div className="brand-hint">
-            <p className="hint-title">Tài khoản test</p>
-            <p className="hint-item">👑 admin / password@</p>
-            <p className="hint-item">💳 cashier01 / password@</p>
+            <p className="hint-title">Chào mừng trở lại</p>
+            <p className="hint-item">Hệ thống quản lý nhà hàng</p>
+            <p className="hint-item">Lumière Restaurant</p>
           </div>
         </div>
         <div className="login-pane">

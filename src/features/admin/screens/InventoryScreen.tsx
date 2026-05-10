@@ -2,13 +2,23 @@ import { useState, useEffect } from "react";
 import { inventoryAPI } from "@/api/endpoints";
 import { InventoryItem, InventoryTransaction } from "@/types";
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
+function Modal({
+  title,
+  onClose,
+  children,
+}: {
+  title: string;
+  onClose: () => void;
+  children: React.ReactNode;
+}) {
   return (
     <div className="modal-overlay" onClick={onClose}>
-      <div className="modal-box" onClick={e => e.stopPropagation()}>
+      <div className="modal-box" onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h3>{title}</h3>
-          <button className="modal-close" onClick={onClose}>✕</button>
+          <button className="modal-close" onClick={onClose}>
+            ✕
+          </button>
         </div>
         {children}
       </div>
@@ -16,30 +26,64 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
   );
 }
 
-function ItemForm({ initial, onSave, onClose }: {
+function ItemForm({
+  initial,
+  onSave,
+  onClose,
+}: {
   initial?: InventoryItem;
   onSave: () => void;
   onClose: () => void;
 }) {
+  const unitOptions = [
+    { value: "G", label: "Gram (g)" },
+    { value: "ML", label: "Milliliter (ml)" },
+    { value: "UNIT", label: "Đơn vị (unit)" },
+  ] as const;
+
   const [name, setName] = useState(initial?.name ?? "");
-  const [unit, setUnit] = useState(initial?.unit ?? "");
+  const [unit, setUnit] = useState(initial?.unit ?? "G");
   const [minStock, setMinStock] = useState(initial?.minStock ?? 0);
   const [currentStock, setCurrentStock] = useState(initial?.currentStock ?? 0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!name.trim()) { setErr("Tên nguyên liệu không được trống"); return; }
-    if (!unit.trim()) { setErr("Đơn vị không được trống"); return; }
-    setLoading(true); setErr(null);
+    if (!name.trim()) {
+      setErr("Tên nguyên liệu không được trống");
+      return;
+    }
+    if (!unit.trim()) {
+      setErr("Đơn vị không được trống");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
     try {
-      const data = { name: name.trim(), unit: unit.trim(), minStock, currentStock };
-      if (initial) await inventoryAPI.updateItem(initial.id, data);
-      else await inventoryAPI.createItem(data);
+      const data = {
+        name: name.trim(),
+        unit: unit.trim(),
+        minStock,
+        currentStock,
+      };
+      if (initial) {
+        await inventoryAPI.updateItem(initial.id, data);
+      } else {
+        const created = await inventoryAPI.createItem(data);
+        if (currentStock > 0) {
+          await inventoryAPI.importStock({
+            itemId: created.data.data.id,
+            quantity: currentStock,
+            note: "Khởi tạo tồn kho ban đầu",
+          });
+        }
+      }
       onSave();
     } catch (e: any) {
       setErr(e.response?.data?.message || "Lỗi lưu nguyên liệu");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -48,25 +92,47 @@ function ItemForm({ initial, onSave, onClose }: {
       <div className="form-row">
         <div className="form-group">
           <label>Tên nguyên liệu *</label>
-          <input value={name} onChange={e => setName(e.target.value)} placeholder="VD: Cà chua" />
+          <input
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            placeholder="VD: Cà chua"
+          />
         </div>
         <div className="form-group">
           <label>Đơn vị *</label>
-          <input value={unit} onChange={e => setUnit(e.target.value)} placeholder="VD: kg, lít, cái" />
+          <select value={unit} onChange={(e) => setUnit(e.target.value)}>
+            {unitOptions.map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {opt.label}
+              </option>
+            ))}
+          </select>
         </div>
       </div>
       <div className="form-row">
         <div className="form-group">
           <label>Tồn kho hiện tại</label>
-          <input type="number" value={currentStock} onChange={e => setCurrentStock(+e.target.value)} min={0} />
+          <input
+            type="number"
+            value={currentStock}
+            onChange={(e) => setCurrentStock(+e.target.value)}
+            min={0}
+          />
         </div>
         <div className="form-group">
           <label>Tồn kho tối thiểu</label>
-          <input type="number" value={minStock} onChange={e => setMinStock(+e.target.value)} min={0} />
+          <input
+            type="number"
+            value={minStock}
+            onChange={(e) => setMinStock(+e.target.value)}
+            min={0}
+          />
         </div>
       </div>
       <div className="form-actions">
-        <button className="btn-secondary" onClick={onClose}>Huỷ</button>
+        <button className="btn-secondary" onClick={onClose}>
+          Huỷ
+        </button>
         <button className="btn-primary" onClick={submit} disabled={loading}>
           {loading ? "Đang lưu..." : initial ? "Cập nhật" : "Thêm nguyên liệu"}
         </button>
@@ -75,7 +141,12 @@ function ItemForm({ initial, onSave, onClose }: {
   );
 }
 
-function TransactionForm({ items, type, onSave, onClose }: {
+function TransactionForm({
+  items,
+  type,
+  onSave,
+  onClose,
+}: {
   items: InventoryItem[];
   type: "import" | "export";
   onSave: () => void;
@@ -88,9 +159,16 @@ function TransactionForm({ items, type, onSave, onClose }: {
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
-    if (!itemId) { setErr("Chọn nguyên liệu"); return; }
-    if (quantity <= 0) { setErr("Số lượng phải lớn hơn 0"); return; }
-    setLoading(true); setErr(null);
+    if (!itemId) {
+      setErr("Chọn nguyên liệu");
+      return;
+    }
+    if (quantity <= 0) {
+      setErr("Số lượng phải lớn hơn 0");
+      return;
+    }
+    setLoading(true);
+    setErr(null);
     try {
       const data = { itemId, quantity, note: note || undefined };
       if (type === "import") await inventoryAPI.importStock(data);
@@ -98,7 +176,9 @@ function TransactionForm({ items, type, onSave, onClose }: {
       onSave();
     } catch (e: any) {
       setErr(e.response?.data?.message || "Lỗi giao dịch kho");
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
@@ -106,24 +186,43 @@ function TransactionForm({ items, type, onSave, onClose }: {
       {err && <div className="form-err">{err}</div>}
       <div className="form-group">
         <label>Nguyên liệu</label>
-        <select value={itemId} onChange={e => setItemId(+e.target.value)}>
-          {items.map(i => <option key={i.id} value={i.id}>{i.name} ({i.unit})</option>)}
+        <select value={itemId} onChange={(e) => setItemId(+e.target.value)}>
+          {items.map((i) => (
+            <option key={i.id} value={i.id}>
+              {i.name} ({i.unit})
+            </option>
+          ))}
         </select>
       </div>
       <div className="form-row">
         <div className="form-group">
           <label>Số lượng</label>
-          <input type="number" value={quantity} onChange={e => setQuantity(+e.target.value)} min={1} />
+          <input
+            type="number"
+            value={quantity}
+            onChange={(e) => setQuantity(+e.target.value)}
+            min={1}
+          />
         </div>
         <div className="form-group">
           <label>Ghi chú</label>
-          <input value={note} onChange={e => setNote(e.target.value)} placeholder="Lý do nhập/xuất..." />
+          <input
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Lý do nhập/xuất..."
+          />
         </div>
       </div>
       <div className="form-actions">
-        <button className="btn-secondary" onClick={onClose}>Huỷ</button>
+        <button className="btn-secondary" onClick={onClose}>
+          Huỷ
+        </button>
         <button className="btn-primary" onClick={submit} disabled={loading}>
-          {loading ? "Đang xử lý..." : type === "import" ? "Nhập kho" : "Xuất kho"}
+          {loading
+            ? "Đang xử lý..."
+            : type === "import"
+              ? "Nhập kho"
+              : "Xuất kho"}
         </button>
       </div>
     </>
@@ -136,12 +235,15 @@ export function InventoryScreen() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tab, setTab] = useState<"items" | "transactions">("items");
-  const [modal, setModal] = useState<"create" | "edit" | "import" | "export" | null>(null);
+  const [modal, setModal] = useState<
+    "create" | "edit" | "import" | "export" | null
+  >(null);
   const [editItem, setEditItem] = useState<InventoryItem | undefined>();
   const [search, setSearch] = useState("");
 
   const load = async () => {
-    setLoading(true); setError(null);
+    setLoading(true);
+    setError(null);
     try {
       // Try admin inventory endpoint; on 500 fall back to kitchen endpoint (MANAGER also has access)
       let loadedItems: InventoryItem[] = [];
@@ -149,7 +251,10 @@ export function InventoryScreen() {
         const itemRes = await inventoryAPI.listItems();
         loadedItems = itemRes.data.data;
       } catch (itemErr: any) {
-        if (itemErr.response?.status === 500 || itemErr.response?.status === 404) {
+        if (
+          itemErr.response?.status === 500 ||
+          itemErr.response?.status === 404
+        ) {
           // Fallback: try kitchen endpoint (accessible to MANAGER+KITCHEN)
           try {
             const kitchenRes = await inventoryAPI.listItemsKitchen();
@@ -172,21 +277,31 @@ export function InventoryScreen() {
         // Transactions 500 is non-fatal — show empty list
         setTransactions([]);
         if (txErr.response?.status === 500) {
-          console.warn("[InventoryScreen] /admin/inventory/transactions returned 500 — backend bug");
+          console.warn(
+            "[InventoryScreen] /admin/inventory/transactions returned 500 — backend bug",
+          );
         }
       }
     } catch (e: any) {
       if (!e.response) {
-        setError("Không thể kết nối đến máy chủ. Kiểm tra backend localhost:8080.");
+        setError(
+          "Không thể kết nối đến máy chủ. Kiểm tra backend localhost:8080.",
+        );
       } else if (e.response?.status === 500) {
-        setError(`Lỗi máy chủ (500): ${e.response?.data?.message || "Backend đang gặp sự cố nội bộ — liên hệ dev backend."}`);
+        setError(
+          `Lỗi máy chủ (500): ${e.response?.data?.message || "Backend đang gặp sự cố nội bộ — liên hệ dev backend."}`,
+        );
       } else {
         setError(e.response?.data?.message || "Lỗi tải dữ liệu kho");
       }
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+  }, []);
 
   const deleteItem = async (i: InventoryItem) => {
     if (!confirm(`Xoá nguyên liệu "${i.name}"?`)) return;
@@ -198,20 +313,37 @@ export function InventoryScreen() {
     }
   };
 
-  const lowStock = items.filter(i => i.currentStock <= i.minStock);
-  const filteredItems = items.filter(i => i.name.toLowerCase().includes(search.toLowerCase()));
+  const lowStock = items.filter((i) => i.currentStock <= i.minStock);
+  const filteredItems = items.filter((i) =>
+    i.name.toLowerCase().includes(search.toLowerCase()),
+  );
 
   return (
     <div className="screen">
       <header className="screen-header">
         <div>
-          <h2>Quản lý <span>Kho hàng</span></h2>
-          <p>{items.length} nguyên liệu{lowStock.length > 0 ? ` · ⚠️ ${lowStock.length} sắp hết` : ""}</p>
+          <h2>
+            Quản lý <span>Kho hàng</span>
+          </h2>
+          <p>
+            {items.length} nguyên liệu
+            {lowStock.length > 0 ? ` · ⚠️ ${lowStock.length} sắp hết` : ""}
+          </p>
         </div>
         <div className="header-actions">
-          <button className="btn-secondary" onClick={() => setModal("import")}>📥 Nhập kho</button>
-          <button className="btn-secondary" onClick={() => setModal("export")}>📤 Xuất kho</button>
-          <button className="btn-primary" onClick={() => { setModal("create"); setEditItem(undefined); }}>
+          <button className="btn-secondary" onClick={() => setModal("import")}>
+            📥 Nhập kho
+          </button>
+          <button className="btn-secondary" onClick={() => setModal("export")}>
+            📤 Xuất kho
+          </button>
+          <button
+            className="btn-primary"
+            onClick={() => {
+              setModal("create");
+              setEditItem(undefined);
+            }}
+          >
             + Thêm nguyên liệu
           </button>
         </div>
@@ -221,15 +353,21 @@ export function InventoryScreen() {
 
       {lowStock.length > 0 && (
         <div className="low-stock-alert">
-          ⚠️ Nguyên liệu sắp hết: {lowStock.map(i => i.name).join(", ")}
+          ⚠️ Nguyên liệu sắp hết: {lowStock.map((i) => i.name).join(", ")}
         </div>
       )}
 
       <div className="inv-tabs">
-        <button className={`inv-tab ${tab === "items" ? "active" : ""}`} onClick={() => setTab("items")}>
+        <button
+          className={`inv-tab ${tab === "items" ? "active" : ""}`}
+          onClick={() => setTab("items")}
+        >
           Danh sách nguyên liệu
         </button>
-        <button className={`inv-tab ${tab === "transactions" ? "active" : ""}`} onClick={() => setTab("transactions")}>
+        <button
+          className={`inv-tab ${tab === "transactions" ? "active" : ""}`}
+          onClick={() => setTab("transactions")}
+        >
           Lịch sử giao dịch
         </button>
       </div>
@@ -240,7 +378,7 @@ export function InventoryScreen() {
             className="search-input"
             placeholder="🔍 Tìm nguyên liệu..."
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             style={{ marginBottom: 12 }}
           />
           {loading && <div className="loading-state">Đang tải...</div>}
@@ -248,10 +386,28 @@ export function InventoryScreen() {
             <div className="inv-empty-hero">
               <div className="inv-empty-icon">📦</div>
               <h3>Chưa có nguyên liệu nào trong kho</h3>
-              <p>Bắt đầu thêm nguyên liệu để theo dõi tồn kho, cảnh báo sắp hết và liên kết với thực đơn sau này.</p>
+              <p>
+                Bắt đầu thêm nguyên liệu để theo dõi tồn kho, cảnh báo sắp hết
+                và liên kết với thực đơn sau này.
+              </p>
               <div className="inv-empty-actions">
-                <button type="button" className="btn-primary" onClick={() => { setModal("create"); setEditItem(undefined); }}>＋ Thêm nguyên liệu đầu tiên</button>
-                <button type="button" className="btn-secondary" onClick={() => setModal("import")}>📥 Nhập từ kho (phiếu nhập)</button>
+                <button
+                  type="button"
+                  className="btn-primary"
+                  onClick={() => {
+                    setModal("create");
+                    setEditItem(undefined);
+                  }}
+                >
+                  ＋ Thêm nguyên liệu đầu tiên
+                </button>
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={() => setModal("import")}
+                >
+                  📥 Nhập từ kho (phiếu nhập)
+                </button>
               </div>
             </div>
           ) : (
@@ -274,27 +430,52 @@ export function InventoryScreen() {
                     return (
                       <tr key={item.id} className={isLow ? "row-warning" : ""}>
                         <td>{idx + 1}</td>
-                        <td><strong>{item.name}</strong></td>
+                        <td>
+                          <strong>{item.name}</strong>
+                        </td>
                         <td>{item.unit}</td>
                         <td>{item.currentStock}</td>
                         <td>{item.minStock}</td>
                         <td>
-                          <span className={`status-badge ${isLow ? "inactive" : "active"}`}>
+                          <span
+                            className={`status-badge ${isLow ? "inactive" : "active"}`}
+                          >
                             {isLow ? "⚠️ Sắp hết" : "✅ Đủ"}
                           </span>
                         </td>
                         <td>
                           <div className="row-actions">
-                            <button type="button" className="btn-small" onClick={() => { setEditItem(item); setModal("edit"); }}>✏️ Sửa</button>
-                            <button type="button" className="btn-small danger" onClick={() => deleteItem(item)}>🗑️</button>
+                            <button
+                              type="button"
+                              className="btn-small"
+                              onClick={() => {
+                                setEditItem(item);
+                                setModal("edit");
+                              }}
+                            >
+                              ✏️ Sửa
+                            </button>
+                            <button
+                              type="button"
+                              className="btn-small danger"
+                              onClick={() => deleteItem(item)}
+                            >
+                              🗑️
+                            </button>
                           </div>
                         </td>
                       </tr>
                     );
                   })}
-                  {filteredItems.length === 0 && !loading && items.length > 0 && (
-                    <tr><td colSpan={7} className="empty-cell">Không có nguyên liệu khớp tìm kiếm.</td></tr>
-                  )}
+                  {filteredItems.length === 0 &&
+                    !loading &&
+                    items.length > 0 && (
+                      <tr>
+                        <td colSpan={7} className="empty-cell">
+                          Không có nguyên liệu khớp tìm kiếm.
+                        </td>
+                      </tr>
+                    )}
                 </tbody>
               </table>
             </div>
@@ -322,7 +503,11 @@ export function InventoryScreen() {
                   <td>{tx.itemName}</td>
                   <td>
                     <span className={`tx-badge ${tx.type.toLowerCase()}`}>
-                      {tx.type === "IMPORT" ? "📥 Nhập" : tx.type === "EXPORT" ? "📤 Xuất" : "⚙️ Điều chỉnh"}
+                      {tx.type === "IMPORT"
+                        ? "📥 Nhập"
+                        : tx.type === "EXPORT"
+                          ? "📤 Xuất"
+                          : "⚙️ Điều chỉnh"}
                     </span>
                   </td>
                   <td>{tx.quantity}</td>
@@ -331,7 +516,11 @@ export function InventoryScreen() {
                 </tr>
               ))}
               {transactions.length === 0 && (
-                <tr><td colSpan={6} className="empty-cell">Chưa có giao dịch nào</td></tr>
+                <tr>
+                  <td colSpan={6} className="empty-cell">
+                    Chưa có giao dịch nào
+                  </td>
+                </tr>
               )}
             </tbody>
           </table>
@@ -339,18 +528,44 @@ export function InventoryScreen() {
       )}
 
       {(modal === "create" || modal === "edit") && (
-        <Modal title={modal === "create" ? "Thêm nguyên liệu" : "Sửa nguyên liệu"} onClose={() => setModal(null)}>
-          <ItemForm initial={editItem} onSave={() => { setModal(null); load(); }} onClose={() => setModal(null)} />
+        <Modal
+          title={modal === "create" ? "Thêm nguyên liệu" : "Sửa nguyên liệu"}
+          onClose={() => setModal(null)}
+        >
+          <ItemForm
+            initial={editItem}
+            onSave={() => {
+              setModal(null);
+              load();
+            }}
+            onClose={() => setModal(null)}
+          />
         </Modal>
       )}
       {modal === "import" && (
         <Modal title="Nhập kho" onClose={() => setModal(null)}>
-          <TransactionForm items={items} type="import" onSave={() => { setModal(null); load(); }} onClose={() => setModal(null)} />
+          <TransactionForm
+            items={items}
+            type="import"
+            onSave={() => {
+              setModal(null);
+              load();
+            }}
+            onClose={() => setModal(null)}
+          />
         </Modal>
       )}
       {modal === "export" && (
         <Modal title="Xuất kho" onClose={() => setModal(null)}>
-          <TransactionForm items={items} type="export" onSave={() => { setModal(null); load(); }} onClose={() => setModal(null)} />
+          <TransactionForm
+            items={items}
+            type="export"
+            onSave={() => {
+              setModal(null);
+              load();
+            }}
+            onClose={() => setModal(null)}
+          />
         </Modal>
       )}
     </div>
