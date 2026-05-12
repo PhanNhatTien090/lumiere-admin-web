@@ -1,3 +1,5 @@
+export type TaxMode = "NO_TAX" | "EXCLUSIVE" | "INCLUSIVE";
+
 // ─── API Wrapper ───────────────────────────────────────────────────────────────
 export interface ApiResponse<T> {
   success: boolean;
@@ -96,6 +98,8 @@ export interface MenuItemResponse {
   name: string;
   description?: string | null;
   price: number;
+  itemTaxMode?: TaxMode | null;
+  itemTaxRateBps?: number | null;
   cookTime?: number | null;
   available: boolean;
   imageUrl?: string | null;
@@ -112,6 +116,8 @@ export interface CreateMenuItemRequest {
   cookTime?: number | null;
   imageUrl?: string | null;
   itemType: ItemType;
+  itemTaxMode?: TaxMode | null;
+  itemTaxRateBps?: number | null;
 }
 
 // ─── Order ─────────────────────────────────────────────────────────────────────
@@ -139,6 +145,10 @@ export interface OrderItemResponse {
   quantity: number;
   unitPrice: number;
   subtotal: number;
+  unitTaxMode?: TaxMode;
+  unitTaxRateBps?: number;
+  netSubtotal?: number;
+  taxSubtotal?: number;
   note?: string | null;
   status: OrderItemStatus;
   createdAt: string;
@@ -151,7 +161,13 @@ export interface OrderResponse {
   tableId: number;
   tableCode?: string;
   status: OrderStatus;
+  subtotalAmount: number;
+  taxAmount: number;
   totalAmount: number;
+  taxMode: TaxMode;
+  taxRateBps: number;
+  taxSnapshotAt?: string | null;
+  taxSnapshotById?: number | null;
   note?: string | null;
   splitBillAllowed: boolean;
   createdAt: string;
@@ -182,7 +198,12 @@ export interface CreatePaymentRequest {
 export interface PaymentResponse {
   paymentId: number;
   orderId: number;
+  shiftId: number;
+  subtotalAmount: number;
+  taxAmount: number;
   amount: number;
+  taxMode: TaxMode;
+  taxRateBps: number;
   paymentMethod: PaymentMethod;
   provider: PaymentProvider;
   status: PaymentStatus;
@@ -247,8 +268,8 @@ export interface RevenueDetailResponse {
   generatedAt: string;
 }
 
-// ─── Admin Menu Categories ──────────────────────────────────────────────────────
-export interface AdminMenuCategoryListItemResponse {
+// ─── Manager Menu Categories ───────────────────────────────────────────────────
+export interface ManagerMenuCategoryListItemResponse {
   id: number;
   name: string;
   description?: string | null;
@@ -376,7 +397,7 @@ export interface ForecastResponse {
   predictions: ForecastPrediction[];
 }
 
-/** POST /admin/menu/items/combo-generate */
+/** POST /manager/menu/items/combo-generate */
 export interface ComboGenerateRequest {
   analyzeDays?: number;
   minSupport?: number;
@@ -394,16 +415,50 @@ export interface ComboGenerateResponse {
   draftCombos: DraftCombo[];
 }
 
-/** POST /admin/ai/retrain */
+/** POST /manager/ai/retrain */
 export interface RetrainJobResponse {
   jobId: string;
   status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
 }
 
-/** GET /admin/ai/jobs/{jobId} */
+/** GET /manager/ai/jobs/{jobId} */
 export interface RetrainJobStatusResponse {
   success: boolean;
   jobId: string;
   status: "PENDING" | "PROCESSING" | "COMPLETED" | "FAILED";
   message: string;
+}
+
+// ─── Tax Management (MANAGER only) ─────────────────────────────────────────────
+
+/** GET/PUT /manager/tax/config */
+export interface TaxConfigResponse {
+  taxMode: TaxMode;
+  taxRateBps: number;
+  taxRatePercent: number;
+  updatedAt?: string;
+  updatedBy?: number;
+}
+
+export interface TaxConfigUpdateRequest {
+  taxMode: TaxMode;
+  taxRateBps: number;
+}
+
+/** GET /manager/tax/preview/menu-items */
+export interface MenuItemPricingPreviewRow {
+  menuItemId: number;
+  name: string;
+  category: string;
+  effectiveTaxMode: TaxMode;
+  effectiveTaxRateBps: number;
+  grossPrice: number;
+  netPrice: number;
+  taxAmount: number;
+}
+
+export interface MenuItemPricingPreviewResponse {
+  globalTaxMode: TaxMode;
+  globalTaxRateBps: number;
+  items: MenuItemPricingPreviewRow[];
 }

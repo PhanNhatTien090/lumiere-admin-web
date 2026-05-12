@@ -22,7 +22,7 @@ import {
   AnalyticsSummary,
   RevenueDetailResponse,
   RevenueGroupBy,
-  AdminMenuCategoryListItemResponse,
+  ManagerMenuCategoryListItemResponse,
   CloseShiftResponse,
   InventoryItem,
   InventoryTransaction,
@@ -40,6 +40,9 @@ import {
   ComboGenerateResponse,
   RetrainJobResponse,
   RetrainJobStatusResponse,
+  TaxConfigResponse,
+  TaxConfigUpdateRequest,
+  MenuItemPricingPreviewResponse,
 } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 
@@ -103,25 +106,25 @@ export const orderAPI = {
 // ─── Menu Categories (MANAGER) ──────────────────────────────────────────────────
 export const categoryAPI = {
   list: () =>
-    axiosInstance.get<ApiResponse<AdminMenuCategoryListItemResponse[]>>(
-      "/admin/menu/categories",
+    axiosInstance.get<ApiResponse<ManagerMenuCategoryListItemResponse[]>>(
+      "/manager/menu/categories",
     ),
   getOne: (id: number) =>
     axiosInstance.get<ApiResponse<CategoryResponse>>(
-      `/admin/menu/categories/${id}`,
+      `/manager/menu/categories/${id}`,
     ),
   create: (data: CreateCategoryRequest) =>
     axiosInstance.post<ApiResponse<CategoryResponse>>(
-      "/admin/menu/categories",
+      "/manager/menu/categories",
       data,
     ),
   update: (id: number, data: Partial<CreateCategoryRequest>) =>
     axiosInstance.put<ApiResponse<CategoryResponse>>(
-      `/admin/menu/categories/${id}`,
+      `/manager/menu/categories/${id}`,
       data,
     ),
   remove: (id: number) =>
-    axiosInstance.delete<ApiResponse<void>>(`/admin/menu/categories/${id}`),
+    axiosInstance.delete<ApiResponse<void>>(`/manager/menu/categories/${id}`),
 };
 
 // ─── Menu Items (MANAGER) ───────────────────────────────────────────────────────
@@ -133,16 +136,16 @@ export const menuItemAPI = {
     }),
   create: (data: CreateMenuItemRequest) =>
     axiosInstance.post<ApiResponse<MenuItemResponse>>(
-      "/admin/menu/items",
+      "/manager/menu/items",
       data,
     ),
   update: (id: number, data: Partial<CreateMenuItemRequest>) =>
     axiosInstance.put<ApiResponse<MenuItemResponse>>(
-      `/admin/menu/items/${id}`,
+      `/manager/menu/items/${id}`,
       data,
     ),
   remove: (id: number) =>
-    axiosInstance.delete<ApiResponse<void>>(`/admin/menu/items/${id}`),
+    axiosInstance.delete<ApiResponse<void>>(`/manager/menu/items/${id}`),
   uploadImage: (id: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -160,14 +163,14 @@ export const menuItemAPI = {
 export const tableAPI = {
   list: () => axiosInstance.get<ApiResponse<TableResponse[]>>("/tables"),
   create: (data: CreateTableRequest) =>
-    axiosInstance.post<ApiResponse<TableResponse>>("/admin/tables", data),
+    axiosInstance.post<ApiResponse<TableResponse>>("/manager/tables", data),
   update: (tableCode: string, data: Partial<CreateTableRequest>) =>
     axiosInstance.put<ApiResponse<TableResponse>>(
-      `/admin/tables/${tableCode}`,
+      `/manager/tables/${tableCode}`,
       data,
     ),
   remove: (tableCode: string) =>
-    axiosInstance.delete<ApiResponse<void>>(`/admin/tables/${tableCode}`),
+    axiosInstance.delete<ApiResponse<void>>(`/manager/tables/${tableCode}`),
   getQr: (tableCode: string) =>
     axiosInstance.get<ApiResponse<QrCodeResponse>>(
       `/tables/${tableCode}/qr-code`,
@@ -246,7 +249,7 @@ const mapStockTxnToUi = (
 export const inventoryAPI = {
   listItems: () =>
     axiosInstance
-      .get<ApiResponse<IngredientResponseDto[]>>("/admin/inventory/ingredients")
+      .get<ApiResponse<IngredientResponseDto[]>>("/manager/inventory/ingredients")
       .then((res) => ({
         ...res,
         data: {
@@ -268,7 +271,7 @@ export const inventoryAPI = {
   createItem: (data: Partial<InventoryItem>) =>
     axiosInstance
       .post<ApiResponse<IngredientResponseDto>>(
-        "/admin/inventory/ingredients",
+        "/manager/inventory/ingredients",
         {
           name: data.name,
           unit: mapUnitToBackend(data.unit),
@@ -282,7 +285,7 @@ export const inventoryAPI = {
   updateItem: (id: number, data: Partial<InventoryItem>) =>
     axiosInstance
       .put<ApiResponse<IngredientResponseDto>>(
-        `/admin/inventory/ingredients/${id}`,
+        `/manager/inventory/ingredients/${id}`,
         {
           name: data.name,
           unit: mapUnitToBackend(data.unit),
@@ -295,7 +298,7 @@ export const inventoryAPI = {
       })),
   removeItem: (id: number) =>
     axiosInstance.delete<ApiResponse<void>>(
-      `/admin/inventory/ingredients/${id}`,
+      `/manager/inventory/ingredients/${id}`,
     ),
   listTransactions: async () => {
     const itemsRes = await inventoryAPI.listItems();
@@ -304,7 +307,7 @@ export const inventoryAPI = {
       items.map((item) =>
         axiosInstance
           .get<ApiResponse<StockTransactionResponseDto[]>>(
-            `/admin/inventory/stock/${item.id}/history`,
+            `/manager/inventory/stock/${item.id}/history`,
           )
           .then((res) => ({ item, history: res.data.data || [] }))
           .catch(() => ({ item, history: [] })),
@@ -329,7 +332,7 @@ export const inventoryAPI = {
   },
   importStock: (data: { itemId: number; quantity: number; note?: string }) =>
     axiosInstance.post<ApiResponse<IngredientResponseDto>>(
-      "/admin/inventory/stock/import",
+      "/manager/inventory/stock/import",
       {
         ingredientId: data.itemId,
         quantity: data.quantity,
@@ -342,7 +345,7 @@ export const inventoryAPI = {
     note?: string;
   }) => {
     const itemRes = await axiosInstance.get<ApiResponse<IngredientResponseDto>>(
-      `/admin/inventory/ingredients/${data.itemId}`,
+      `/manager/inventory/ingredients/${data.itemId}`,
     );
     const currentQty = Number(itemRes.data.data.currentQty ?? 0);
     const nextQty = currentQty - data.quantity;
@@ -480,10 +483,10 @@ export const aiAPI = {
         },
       })),
 
-  /** POST /admin/menu/items/combo-generate — FP-Growth combo discovery */
+  /** POST /manager/menu/items/combo-generate — FP-Growth combo discovery */
   generateCombos: (data: ComboGenerateRequest) =>
     axiosInstance
-      .post<ApiResponse<any>>("/admin/menu/items/combo-generate", data)
+      .post<ApiResponse<any>>("/manager/menu/items/combo-generate", data)
       .then((res) => ({
         ...res,
         data: {
@@ -499,13 +502,30 @@ export const aiAPI = {
         },
       })),
 
-  /** POST /admin/ai/retrain — trigger background retraining job */
+  /** POST /manager/ai/retrain — trigger background retraining job */
   triggerRetrain: () =>
-    axiosInstance.post<ApiResponse<RetrainJobResponse>>("/admin/ai/retrain"),
+    axiosInstance.post<ApiResponse<RetrainJobResponse>>("/manager/ai/retrain"),
 
-  /** GET /admin/ai/jobs/{jobId} — poll retrain job status */
+  /** GET /manager/ai/jobs/{jobId} — poll retrain job status */
   pollRetrainJob: (jobId: string) =>
     axiosInstance.get<ApiResponse<RetrainJobStatusResponse>>(
-      `/admin/ai/jobs/${jobId}`,
+      `/manager/ai/jobs/${jobId}`,
+    ),
+};
+
+// ─── Tax Config (MANAGER) ───────────────────────────────────────────────────────
+export const taxAPI = {
+  /** GET /manager/tax/config — lấy cấu hình thuế toàn cục */
+  getConfig: () =>
+    axiosInstance.get<ApiResponse<TaxConfigResponse>>("/manager/tax/config"),
+
+  /** PUT /manager/tax/config — cập nhật cấu hình thuế */
+  updateConfig: (data: TaxConfigUpdateRequest) =>
+    axiosInstance.put<ApiResponse<TaxConfigResponse>>("/manager/tax/config", data),
+
+  /** GET /manager/tax/preview/menu-items — xem trước breakdown gross/net/tax */
+  previewMenuItems: () =>
+    axiosInstance.get<ApiResponse<MenuItemPricingPreviewResponse>>(
+      "/manager/tax/preview/menu-items",
     ),
 };

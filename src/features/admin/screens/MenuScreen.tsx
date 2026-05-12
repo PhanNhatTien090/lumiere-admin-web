@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 import { categoryAPI, menuItemAPI } from "@/api/endpoints";
 import {
-  AdminMenuCategoryListItemResponse,
+  ManagerMenuCategoryListItemResponse,
   MenuItemResponse,
   CreateMenuItemRequest,
   CreateCategoryRequest,
@@ -28,7 +28,7 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
 
 // ─── Category Form ─────────────────────────────────────────────────────────────
 function CategoryForm({ initial, onSave, onClose }: {
-  initial?: AdminMenuCategoryListItemResponse;
+  initial?: ManagerMenuCategoryListItemResponse;
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -79,7 +79,7 @@ function CategoryForm({ initial, onSave, onClose }: {
 // ─── Menu Item Form ─────────────────────────────────────────────────────────────
 function MenuItemForm({ initial, categories, onSave, onClose }: {
   initial?: MenuItemResponse;
-  categories: AdminMenuCategoryListItemResponse[];
+  categories: ManagerMenuCategoryListItemResponse[];
   onSave: () => void;
   onClose: () => void;
 }) {
@@ -179,14 +179,14 @@ function MenuItemForm({ initial, categories, onSave, onClose }: {
 
 // ─── Main MenuScreen ───────────────────────────────────────────────────────────
 export function MenuScreen() {
-  const [categories, setCategories] = useState<AdminMenuCategoryListItemResponse[]>([]);
+  const [categories, setCategories] = useState<ManagerMenuCategoryListItemResponse[]>([]);
   const [items, setItems] = useState<MenuItemResponse[]>([]);
   const [selectedCat, setSelectedCat] = useState<number | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [catModal, setCatModal] = useState<"create" | "edit" | null>(null);
-  const [editCat, setEditCat] = useState<AdminMenuCategoryListItemResponse | undefined>();
+  const [editCat, setEditCat] = useState<ManagerMenuCategoryListItemResponse | undefined>();
   const [itemModal, setItemModal] = useState<"create" | "edit" | null>(null);
   const [editItem, setEditItem] = useState<MenuItemResponse | undefined>();
   const [search, setSearch] = useState("");
@@ -216,7 +216,7 @@ export function MenuScreen() {
 
   useEffect(() => { load(); }, []);
 
-  const deleteCategory = async (cat: AdminMenuCategoryListItemResponse) => {
+  const deleteCategory = async (cat: ManagerMenuCategoryListItemResponse) => {
     if (!confirm(`Xoá danh mục "${cat.name}"? Các món trong danh mục cũng sẽ bị ảnh hưởng.`)) return;
     try {
       await categoryAPI.remove(cat.id);

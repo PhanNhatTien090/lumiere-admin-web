@@ -194,9 +194,23 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
         </div>
       </div>
 
-      <div className="total-row">
-        <span>Tổng cộng</span>
-        <b>{fmtVnd(order.totalAmount)}</b>
+      <div className="order-totals">
+        {order.taxMode !== "NO_TAX" && order.taxAmount > 0 && (
+          <>
+            <div className="total-row subtotal-row">
+              <span>Tạm tính (trước thuế)</span>
+              <span>{fmtVnd(order.subtotalAmount)}</span>
+            </div>
+            <div className="total-row tax-row">
+              <span>Thuế ({(order.taxRateBps / 100).toFixed(0)}%)</span>
+              <span>{fmtVnd(order.taxAmount)}</span>
+            </div>
+          </>
+        )}
+        <div className="total-row grand-total-row">
+          <span>Tổng thanh toán</span>
+          <b>{fmtVnd(order.totalAmount)}</b>
+        </div>
       </div>
 
       {err && <div className="form-err">{err}</div>}
@@ -239,6 +253,18 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
 
           {method === "CASH" && (
             <div className="cash-confirm">
+              {payment.taxMode !== "NO_TAX" && payment.taxAmount > 0 && (
+                <div className="cash-breakdown">
+                  <div className="cash-amount-row">
+                    <span>Trước thuế</span>
+                    <span>{fmtVnd(payment.subtotalAmount)}</span>
+                  </div>
+                  <div className="cash-amount-row">
+                    <span>Thuế ({(payment.taxRateBps / 100).toFixed(0)}%)</span>
+                    <span>{fmtVnd(payment.taxAmount)}</span>
+                  </div>
+                </div>
+              )}
               <div className="cash-amount">
                 <span>Số tiền thu</span>
                 <b>{fmtVnd(payment.amount)}</b>
