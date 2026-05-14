@@ -49,7 +49,7 @@ export const menuItemAPI = {
     uploadImage: (id, file) => {
         const form = new FormData();
         form.append("file", file);
-        return axiosInstance.put(`/menu/items/${id}/image`, form, {
+        return axiosInstance.put(`/manager/menu/items/${id}/image`, form, {
             headers: { "Content-Type": "multipart/form-data" },
         });
     },

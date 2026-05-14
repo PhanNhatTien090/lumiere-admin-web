@@ -150,7 +150,7 @@ export const menuItemAPI = {
     const form = new FormData();
     form.append("file", file);
     return axiosInstance.put<ApiResponse<MenuItemResponse>>(
-      `/menu/items/${id}/image`,
+      `/manager/menu/items/${id}/image`,
       form,
       {
         headers: { "Content-Type": "multipart/form-data" },
