@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { inventoryAPI } from "@/api/endpoints";
 import { InventoryItem, InventoryTransaction } from "@/types";
+import { fmtDateTime } from "@/utils/format";
 
 function Modal({
   title,
@@ -512,7 +513,7 @@ export function InventoryScreen() {
                   </td>
                   <td>{tx.quantity}</td>
                   <td>{tx.note || "—"}</td>
-                  <td>{new Date(tx.createdAt).toLocaleString("vi-VN")}</td>
+                  <td>{fmtDateTime(tx.createdAt)}</td>
                 </tr>
               ))}
               {transactions.length === 0 && (

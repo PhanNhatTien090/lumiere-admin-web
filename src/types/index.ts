@@ -116,8 +116,49 @@ export interface CreateMenuItemRequest {
   cookTime?: number | null;
   imageUrl?: string | null;
   itemType: ItemType;
+  comboKind?: ComboKind | null;
+  itemTaxMode: TaxMode;
+  itemTaxRateBps: number;
+}
+
+export interface FixedComboComponent {
+  menuItemId: number;
+  quantity: number;
+}
+
+export interface PickComboSlot {
+  id?: number;
+  name: string;
+  minSelect: number;
+  maxSelect: number;
+  displayOrder: number;
+  allowedItemIds: number[];
+}
+
+export interface UpsertFixedComboRequest {
+  components: FixedComboComponent[];
+}
+
+export interface UpsertPickComboRequest {
+  slots: PickComboSlot[];
+}
+
+export interface MenuItemDetailResponse extends MenuItemResponse {
   itemTaxMode?: TaxMode | null;
   itemTaxRateBps?: number | null;
+  fixedCombo?: {
+    components: Array<{ menuItemId: number; quantity: number }>;
+  } | null;
+  pickCombo?: {
+    slots: Array<{
+      id: number;
+      name: string;
+      minSelect: number;
+      maxSelect: number;
+      displayOrder: number;
+      allowedItemIds: number[];
+    }>;
+  } | null;
 }
 
 // ─── Order ─────────────────────────────────────────────────────────────────────
@@ -233,7 +274,9 @@ export interface AnalyticsSummary {
   totalOrders: number;
   confirmedOrders: number;
   cancelledOrders: number;
-  totalRevenue: number;
+  totalRevenue: number;       // GROSS — số khách trả (gồm thuế)
+  totalNetRevenue: number;    // NET — doanh thu thuần nhà hàng
+  totalTax: number;           // TAX — thuế đã thu
   successfulPayments: number;
   failedPayments: number;
   fromDate: string;
@@ -245,7 +288,9 @@ export type RevenueGroupBy = "DAY" | "WEEK" | "MONTH" | "YEAR";
 
 export interface RevenuePeriod {
   periodLabel: string;
-  revenue: number;
+  revenue: number;     // GROSS
+  netRevenue: number;  // NET
+  taxAmount: number;   // TAX
   orderCount: number;
 }
 
@@ -262,6 +307,8 @@ export interface RevenueDetailResponse {
   toDate: string;
   groupBy: RevenueGroupBy;
   totalRevenue: number;
+  totalNetRevenue: number;
+  totalTax: number;
   totalOrders: number;
   periods: RevenuePeriod[];
   topItems: RevenueTopItem[];
@@ -369,6 +416,17 @@ export interface CloseShiftResponse {
   actualCash: number;
   discrepancy: number;
   notes?: string | null;
+}
+
+export interface ShiftSummaryResponse {
+  shiftId: number;
+  cashierId: number;
+  openedAt: string;
+  openingTotal: number;
+  cashRevenue: number;
+  transferRevenue: number;
+  expectedCash: number;
+  totalBills: number;
 }
 
 /** GET /orders/{orderId}/invoice — JSON invoice payload */

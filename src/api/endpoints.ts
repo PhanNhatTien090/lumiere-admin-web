@@ -33,6 +33,7 @@ import {
   ShiftResponse,
   OpenShiftRequestBody,
   CloseShiftRequestBody,
+  ShiftSummaryResponse,
   OrderInvoiceJson,
   ForecastRequest,
   ForecastResponse,
@@ -51,8 +52,21 @@ export const publicMenuAPI = {
   /** GET /menu/categories — public, returns categories with nested items */
   listCategories: () =>
     axiosInstance.get<ApiResponse<CategoryResponse[]>>("/menu/categories"),
-  /** GET /menu — public, returns flat list of MenuItemResponse */
-  listItems: () => axiosInstance.get<ApiResponse<MenuItemResponse[]>>("/menu"),
+  /**
+   * GET /menu — backend returns categories with nested items; we flatten so
+   * callers get a `MenuItemResponse[]` keyed by menuItemId (not categoryId).
+   */
+  listItems: async () => {
+    const res = await axiosInstance.get<ApiResponse<CategoryResponse[]>>("/menu");
+    const categories = res.data?.data ?? [];
+    const flat: MenuItemResponse[] = categories.flatMap(
+      (cat) => cat.items ?? [],
+    );
+    return {
+      ...res,
+      data: { ...res.data, data: flat },
+    } as typeof res & { data: ApiResponse<MenuItemResponse[]> };
+  },
 };
 
 // ─── Auth ───────────────────────────────────────────────────────────────────────
@@ -92,7 +106,7 @@ export const orderAPI = {
   getOrder: (id: number) =>
     axiosInstance.get<ApiResponse<OrderResponse>>(`/orders/${id}`),
   getInvoiceJson: (id: number) =>
-    axiosInstance.get<ApiResponse<OrderInvoiceJson>>(`/orders/${id}/invoice`),
+    axiosInstance.get<ApiResponse<OrderInvoiceJson>>(`/payments/orders/${id}/invoice`),
   confirmOrder: (id: number) =>
     axiosInstance.put<ApiResponse<OrderResponse>>(`/orders/${id}/confirm`),
   cancelOrder: (id: number, reason: string) =>
@@ -146,6 +160,32 @@ export const menuItemAPI = {
     ),
   remove: (id: number) =>
     axiosInstance.delete<ApiResponse<void>>(`/manager/menu/items/${id}`),
+  getDetail: (id: number) =>
+    axiosInstance.get<ApiResponse<any>>(`/manager/menu/items/${id}`),
+  upsertFixedCombo: (
+    id: number,
+    data: { components: Array<{ menuItemId: number; quantity: number }> },
+  ) =>
+    axiosInstance.put<ApiResponse<any>>(
+      `/manager/menu/items/${id}/combo/fixed`,
+      data,
+    ),
+  upsertPickCombo: (
+    id: number,
+    data: {
+      slots: Array<{
+        name: string;
+        minSelect: number;
+        maxSelect: number;
+        displayOrder: number;
+        allowedItemIds: number[];
+      }>;
+    },
+  ) =>
+    axiosInstance.put<ApiResponse<any>>(
+      `/manager/menu/items/${id}/combo/pick`,
+      data,
+    ),
   uploadImage: (id: number, file: File) => {
     const form = new FormData();
     form.append("file", file);
@@ -432,12 +472,14 @@ export const supportAPI = {
 };
 
 // ─── Cashier shifts (CASHIER, MANAGER) / list all MANAGER ─────────────────────
-// NOTE: shift endpoints return raw objects (no ApiResponse wrapper)
+// NOTE: open/close/current return raw objects (no ApiResponse wrapper)
 export const shiftAPI = {
   open: (data: OpenShiftRequestBody) =>
     axiosInstance.post<ShiftResponse>("/shifts/open", data),
   close: (id: number, data: CloseShiftRequestBody) =>
     axiosInstance.post<CloseShiftResponse>(`/shifts/${id}/close`, data),
+  getSummary: (id: number) =>
+    axiosInstance.get<ShiftSummaryResponse>(`/shifts/${id}/summary`),
   current: () => axiosInstance.get<ShiftResponse>("/shifts/current"),
   listAll: () => axiosInstance.get<ApiResponse<ShiftResponse[]>>("/shifts"),
 };

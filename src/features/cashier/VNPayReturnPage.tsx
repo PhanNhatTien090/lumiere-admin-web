@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import { paymentAPI } from "@/api/endpoints";
+import { fmtDateTime as fmtTime } from "@/utils/format";
 
 type ReturnState = "checking" | "success" | "pending" | "failed";
 
 function fmtVnd(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n) + "đ";
-}
-
-function fmtTime(s: string) {
-  return new Date(s).toLocaleString("vi-VN");
 }
 
 export function VNPayReturnPage() {

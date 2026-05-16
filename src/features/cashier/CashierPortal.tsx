@@ -3,16 +3,13 @@ import { Modal } from "antd";
 import { ClockCircleOutlined, FileTextOutlined, HistoryOutlined } from "@ant-design/icons";
 import { QRCodeSVG } from "qrcode.react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { orderAPI, paymentAPI, shiftAPI } from "@/api/endpoints";
-import { OrderItemResponse, OrderResponse, PaymentMethod, PaymentProvider, PaymentResponse, ShiftResponse } from "@/types";
+import { orderAPI, paymentAPI, publicMenuAPI, shiftAPI } from "@/api/endpoints";
+import { OrderItemResponse, OrderResponse, PaymentMethod, PaymentProvider, PaymentResponse, ShiftResponse, ShiftSummaryResponse } from "@/types";
 import { useAdminStore } from "@/store/adminStore";
+import { fmtDateTime as fmtTime } from "@/utils/format";
 
 function fmtVnd(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n) + "đ";
-}
-
-function fmtTime(s: string) {
-  return new Date(s).toLocaleString("vi-VN");
 }
 
 function parseMoneyInput(raw: string): number {
@@ -56,14 +53,16 @@ function InvoiceJsonExport({ orderId, compact }: { orderId: number; compact?: bo
 }
 
 // ─── Order Item list ───────────────────────────────────────────────────────────
-function OrderItems({ items }: { items: OrderItemResponse[] }) {
-  const billable = items.filter(i => i.billable);
+function OrderItems({ items, menuItemNames }: { items: OrderItemResponse[]; menuItemNames: Map<number, string> }) {
+  const billable = items.filter(i => i.billable && i.status !== "CANCELLED");
   return (
     <div className="order-items">
       {billable.map(item => (
         <div key={item.id} className="order-line">
           <span className="item-qty">{item.quantity}x</span>
-          <span className="item-name">{item.menuItemName || `Món #${item.menuItemId}`}</span>
+          <span className="item-name">
+            {item.menuItemName || menuItemNames.get(item.menuItemId) || `Món #${item.menuItemId}`}
+          </span>
           {item.note && <span className="item-note">({item.note})</span>}
           <span className="item-subtotal">{fmtVnd(item.subtotal)}</span>
         </div>
@@ -295,10 +294,23 @@ function ShiftScreen({ current, onShiftChange }: ShiftScreenProps) {
   const { staff } = useAdminStore();
   const [openingTotal, setOpeningTotal] = useState("");
   const [closingTotal, setClosingTotal] = useState("");
+  const [closingNotes, setClosingNotes] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [closeResult, setCloseResult] = useState<import("@/types").CloseShiftResponse | null>(null);
   const [resumed, setResumed] = useState(false);
+  const [summary, setSummary] = useState<ShiftSummaryResponse | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+
+  const loadSummary = async () => {
+    if (!current?.id) return;
+    setSummaryLoading(true);
+    try {
+      const res = await shiftAPI.getSummary(current.id);
+      setSummary(res.data);
+    } catch { /* ignore */ }
+    finally { setSummaryLoading(false); }
+  };
 
   const openShift = async () => {
     if (!staff?.id) return;
@@ -313,8 +325,6 @@ function ShiftScreen({ current, onShiftChange }: ShiftScreenProps) {
       setOpeningTotal("");
       onShiftChange(res.data);
     } catch (e: any) {
-      // If backend says there's already an open shift (system crash/reload recovery),
-      // silently fetch and resume that shift instead of showing an error.
       if (e.response?.status === 400) {
         try {
           const cur = await shiftAPI.current();
@@ -342,14 +352,16 @@ function ShiftScreen({ current, onShiftChange }: ShiftScreenProps) {
     if (!current?.id) return;
     const amt = parseMoneyInput(closingTotal);
     if (!Number.isFinite(amt) || amt < 0) {
-      setErr("Nhập số tiền cuối ca hợp lệ.");
+      setErr("Nhập số tiền mặt thực tế cuối ca hợp lệ.");
       return;
     }
     setLoading(true); setErr(null);
     try {
-      const res = await shiftAPI.close(current.id, { actualCash: amt });
+      const res = await shiftAPI.close(current.id, { actualCash: amt, notes: closingNotes.trim() || undefined });
       setCloseResult(res.data);
       setClosingTotal("");
+      setClosingNotes("");
+      setSummary(null);
       onShiftChange(null);
     } catch (e: any) {
       const msg = e.response?.data?.message || "Đóng ca thất bại.";
@@ -362,6 +374,13 @@ function ShiftScreen({ current, onShiftChange }: ShiftScreenProps) {
       setLoading(false);
     }
   };
+
+  /* Estimated discrepancy preview (needs summary loaded) */
+  const actualAmt = parseMoneyInput(closingTotal);
+  const estimatedDiscrepancy =
+    summary && Number.isFinite(actualAmt)
+      ? actualAmt - summary.expectedCash
+      : null;
 
   if (!staff?.id) {
     return (
@@ -393,8 +412,25 @@ function ShiftScreen({ current, onShiftChange }: ShiftScreenProps) {
       {!current ? (
         <div className="stat-panel">
           {closeResult && (
-            <div className="alert-success">
-              ✅ Đã đóng ca thành công. Tiền mặt: <strong>{fmtVnd(closeResult.cashRevenue)}</strong> · Chuyển khoản: <strong>{fmtVnd(closeResult.transferRevenue)}</strong> · Chênh lệch: <strong>{fmtVnd(closeResult.discrepancy)}</strong>
+            <div className="alert-success" style={{ marginBottom: 16 }}>
+              <div>✅ <strong>Đã đóng ca #{closeResult.shiftId}</strong></div>
+              <div style={{ marginTop: 8, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <div className="stat-card-mini">
+                  <span className="stat-label">Tiền mặt thu</span>
+                  <span className="stat-value">{fmtVnd(closeResult.cashRevenue)}</span>
+                </div>
+                <div className="stat-card-mini">
+                  <span className="stat-label">Chuyển khoản</span>
+                  <span className="stat-value">{fmtVnd(closeResult.transferRevenue)}</span>
+                </div>
+                <div className={`stat-card-mini ${closeResult.discrepancy !== 0 ? "stat-card-warning" : ""}`}>
+                  <span className="stat-label">Chênh lệch</span>
+                  <span className="stat-value">{fmtVnd(closeResult.discrepancy)}</span>
+                </div>
+              </div>
+              {closeResult.notes && (
+                <p style={{ marginTop: 6, fontSize: 12, color: "#6b7280" }}>Ghi chú: {closeResult.notes}</p>
+              )}
             </div>
           )}
           <h4>📒 Mở ca mới</h4>
@@ -438,18 +474,94 @@ function ShiftScreen({ current, onShiftChange }: ShiftScreenProps) {
               <span className="stat-value">{fmtVnd(current.openingTotal)}</span>
             </div>
           </div>
+
+          {/* ── Revenue preview ── */}
+          <div style={{ marginBottom: 20 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 600, color: "#374151" }}>📊 Doanh thu ca hiện tại</span>
+              <button
+                type="button"
+                className="btn-small"
+                onClick={() => void loadSummary()}
+                disabled={summaryLoading}
+              >
+                {summaryLoading ? "Đang tải…" : summary ? "🔄 Cập nhật" : "Xem trước"}
+              </button>
+            </div>
+            {summary ? (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <div className="stat-card-mini">
+                  <span className="stat-label">Tiền mặt thu</span>
+                  <span className="stat-value">{fmtVnd(summary.cashRevenue)}</span>
+                </div>
+                <div className="stat-card-mini">
+                  <span className="stat-label">Chuyển khoản</span>
+                  <span className="stat-value">{fmtVnd(summary.transferRevenue)}</span>
+                </div>
+                <div className="stat-card-mini">
+                  <span className="stat-label">Dự kiến trong két</span>
+                  <span className="stat-value gold">{fmtVnd(summary.expectedCash)}</span>
+                </div>
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: "#9ca3af" }}>Nhấn "Xem trước" để kiểm tra doanh thu trước khi kết ca.</p>
+            )}
+          </div>
+
           <hr style={{ margin: "0 0 18px", borderColor: "#e5e7eb" }} />
           <h4 style={{ marginBottom: 12 }}>Kết ca</h4>
           <p style={{ marginBottom: 12, color: "#6b7280", fontSize: 14 }}>
-            Nhập số tiền mặt thực tế trong két để hệ thống tính chênh lệch.
+            Nhập số tiền mặt thực tế trong két. Nếu có chênh lệch, bắt buộc phải ghi lý do.
           </p>
           <div className="form-group">
-            <label htmlFor="closing-total">Số tiền mặt thực tế cuối ca (VND)</label>
+            <label htmlFor="closing-total">Số tiền mặt thực tế cuối ca (VND) *</label>
             <input
               id="closing-total"
               placeholder="VD: 5.000.000"
               value={closingTotal}
               onChange={(ev) => setClosingTotal(ev.target.value)}
+            />
+          </div>
+
+          {/* Live discrepancy indicator */}
+          {summary && estimatedDiscrepancy !== null && (
+            <div style={{
+              padding: "8px 12px",
+              borderRadius: 8,
+              marginBottom: 12,
+              background: estimatedDiscrepancy === 0 ? "rgba(74,222,128,0.08)" : "rgba(251,191,36,0.08)",
+              border: `1px solid ${estimatedDiscrepancy === 0 ? "rgba(74,222,128,0.25)" : "rgba(251,191,36,0.25)"}`,
+              fontSize: 13,
+              color: estimatedDiscrepancy === 0 ? "#4ade80" : "#fbbf24",
+            }}>
+              {estimatedDiscrepancy === 0
+                ? "✅ Không có chênh lệch — có thể kết ca không cần ghi chú."
+                : `⚠️ Chênh lệch dự kiến: ${fmtVnd(estimatedDiscrepancy)} — bắt buộc nhập lý do bên dưới.`}
+            </div>
+          )}
+
+          <div className="form-group">
+            <label htmlFor="closing-notes">
+              Lý do sai số / Ghi chú kết ca
+              {estimatedDiscrepancy !== null && estimatedDiscrepancy !== 0 && (
+                <span style={{ color: "#ef4444", marginLeft: 4 }}>*</span>
+              )}
+            </label>
+            <textarea
+              id="closing-notes"
+              rows={3}
+              placeholder="VD: Khách trả dư 50.000đ và không lấy lại; hoặc không có sai số..."
+              value={closingNotes}
+              onChange={(ev) => setClosingNotes(ev.target.value)}
+              style={{
+                width: "100%",
+                padding: "8px 12px",
+                borderRadius: 8,
+                border: "1px solid #d1d5db",
+                fontSize: 14,
+                resize: "vertical",
+                fontFamily: "inherit",
+              }}
             />
           </div>
           <button type="button" className="btn-danger" disabled={loading} onClick={() => void closeShiftNow()}>
@@ -470,6 +582,17 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
   const [orders, setOrders] = useState<OrderResponse[]>([]);
   const [selected, setSelected] = useState<OrderResponse | null>(null);
   const [loading, setLoading] = useState(false);
+  const [menuItemNames, setMenuItemNames] = useState<Map<number, string>>(new Map());
+
+  useEffect(() => {
+    publicMenuAPI.listItems()
+      .then(res => {
+        const map = new Map<number, string>();
+        res.data.data.forEach(item => map.set(item.id, item.name));
+        setMenuItemNames(map);
+      })
+      .catch(() => { /* silently fall back to Món #ID */ });
+  }, []);
 
   const fetchOrders = useCallback(async () => {
     try {
@@ -549,7 +672,7 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
                 <h3>Bàn {selected.tableCode || selected.tableId}</h3>
                 <small>Đơn #{selected.id}</small>
               </div>
-              <OrderItems items={selected.items || []} />
+              <OrderItems items={selected.items || []} menuItemNames={menuItemNames} />
               <div className="detail-divider" />
               <div className="header-actions" style={{ marginBottom: 12 }}>
                 <InvoiceJsonExport orderId={selected.id} />

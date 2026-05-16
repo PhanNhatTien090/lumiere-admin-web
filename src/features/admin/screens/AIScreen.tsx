@@ -6,6 +6,7 @@ import type {
   DraftCombo,
   MenuItemResponse,
 } from "@/types";
+import { fmtDate, fmtDateShort } from "@/utils/format";
 
 // ─── Helper ───────────────────────────────────────────────────────────────────
 function fmtVnd(n: number) {
@@ -88,7 +89,7 @@ function ForecastChart({ predictions, metric }: ForecastChartProps) {
         // Show date relative to today
         const date = new Date();
         date.setDate(date.getDate() + p.day);
-        const label = date.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+        const label = fmtDateShort(date);
         return (
           <g key={p.day}>
             <circle cx={cx} cy={cy} r={4} fill="#c49a2b" />
@@ -161,9 +162,9 @@ function ForecastPanel() {
             type="number"
             className="ai-input"
             min={1}
-            max={90}
+            max={30}
             value={horizon}
-            onChange={(e) => setHorizon(Math.min(90, Math.max(1, Number(e.target.value))))}
+            onChange={(e) => setHorizon(Math.min(30, Math.max(1, Number(e.target.value))))}
           />
         </label>
         <button className="btn-primary ai-run-btn" onClick={run} disabled={loading}>
@@ -201,9 +202,7 @@ function ForecastPanel() {
                     : (v: number | undefined) => v == null ? "—" : v.toLocaleString("vi-VN");
                   return (
                     <tr key={p.day}>
-                      <td>
-                        {date.toLocaleDateString("vi-VN", { weekday: "short", day: "2-digit", month: "2-digit" })}
-                      </td>
+                      <td>{fmtDate(date)}</td>
                       <td className="fw-bold">{fmt(p.value)}</td>
                       <td className="text-muted">{fmt(p.lowerBound)}</td>
                       <td className="text-muted">{fmt(p.upperBound)}</td>

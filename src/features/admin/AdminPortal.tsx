@@ -1,6 +1,7 @@
 import { useState } from "react";
 import {
   BarChartOutlined,
+  LineChartOutlined,
   AppstoreOutlined,
   TableOutlined,
   TeamOutlined,
@@ -9,19 +10,21 @@ import {
 } from "@ant-design/icons";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { AnalyticsScreen } from "./screens/AnalyticsScreen";
+import { RevenueScreen } from "./screens/RevenueScreen";
 import { MenuScreen } from "./screens/MenuScreen";
 import { TablesScreen } from "./screens/TablesScreen";
 import { StaffScreen } from "./screens/StaffScreen";
 import { InventoryScreen } from "./screens/InventoryScreen";
 import { AIScreen } from "./screens/AIScreen";
 
-type AdminTab = "analytics" | "menu" | "tables" | "staff" | "inventory" | "ai";
+type AdminTab = "analytics" | "revenue" | "menu" | "tables" | "staff" | "inventory" | "ai";
 
 export function AdminPortal() {
   const [tab, setTab] = useState<AdminTab>("analytics");
 
   const navItems = [
     { id: "analytics", label: "Thống kê",      icon: <BarChartOutlined /> },
+    { id: "revenue",   label: "Báo cáo DT",     icon: <LineChartOutlined /> },
     { id: "menu",      label: "Quản lý Menu",   icon: <AppstoreOutlined /> },
     { id: "tables",    label: "Bàn & QR",       icon: <TableOutlined /> },
     { id: "staff",     label: "Nhân viên",      icon: <TeamOutlined /> },
@@ -38,6 +41,7 @@ export function AdminPortal() {
       onTabChange={(t) => setTab(t as AdminTab)}
     >
       {tab === "analytics" && <AnalyticsScreen />}
+      {tab === "revenue"   && <RevenueScreen />}
       {tab === "menu"      && <MenuScreen />}
       {tab === "tables"    && <TablesScreen />}
       {tab === "staff"     && <StaffScreen />}

@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { tableAPI } from "@/api/endpoints";
 import { TableResponse, CreateTableRequest, QrCodeResponse, TableStatus } from "@/types";
+import { fmtDateTime } from "@/utils/format";
 
 const STATUS_LABELS: Record<TableStatus, string> = {
   AVAILABLE: "Trống",
@@ -134,7 +135,7 @@ function QrPanel({ table, onClose }: { table: TableResponse; onClose: () => void
             </div>
           )}
           {qr.expiresAt && (
-            <p className="qr-expire">Hết hạn: {new Date(qr.expiresAt).toLocaleString("vi-VN")}</p>
+            <p className="qr-expire">Hết hạn: {fmtDateTime(qr.expiresAt)}</p>
           )}
           <div className="form-actions" style={{ marginTop: 16 }}>
             <button className="btn-danger" onClick={rotateQr} disabled={rotating}>

@@ -1,16 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { analyticsAPI } from "@/api/endpoints";
 import { AnalyticsSummary } from "@/types";
-
-function fmt(n: number) {
-  if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + "M";
-  if (n >= 1_000) return (n / 1_000).toFixed(0) + "K";
-  return n.toString();
-}
-
-function fmtVnd(n: number) {
-  return new Intl.NumberFormat("vi-VN").format(n) + "đ";
-}
+import { fmtVnd, fmtVndCompact, fmtCount as fmt, fmtDate, fmtDateTime } from "@/utils/format";
 
 export function AnalyticsScreen() {
   const today = new Date().toISOString().slice(0, 10);
@@ -42,8 +33,11 @@ export function AnalyticsScreen() {
     }
   };
 
-  // Do NOT auto-load on mount — user explicitly clicks "Xem báo cáo"
-  // useEffect(() => { load(); }, []);
+  // Auto-load với khoảng ngày mặc định (30 ngày gần nhất) khi mở trang
+  useEffect(() => {
+    load();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const successRate = data
     ? ((data.successfulPayments / (data.totalOrders || 1)) * 100).toFixed(1)
@@ -77,8 +71,28 @@ export function AnalyticsScreen() {
             <div className="metric-card accent">
               <div className="metric-icon">💰</div>
               <div>
-                <p>Tổng doanh thu</p>
-                <b className="metric-value">{fmtVnd(data.totalRevenue)}</b>
+                <p>Tổng doanh thu (gồm thuế)</p>
+                <b className="metric-value" title={fmtVnd(data.totalRevenue)}>
+                  {fmtVndCompact(data.totalRevenue)}
+                </b>
+              </div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-icon">🏦</div>
+              <div>
+                <p>Doanh thu thuần (NET)</p>
+                <b className="metric-value" title={fmtVnd(data.totalNetRevenue)}>
+                  {fmtVndCompact(data.totalNetRevenue)}
+                </b>
+              </div>
+            </div>
+            <div className="metric-card">
+              <div className="metric-icon">🧾</div>
+              <div>
+                <p>Thuế đã thu</p>
+                <b className="metric-value" title={fmtVnd(data.totalTax)}>
+                  {fmtVndCompact(data.totalTax)}
+                </b>
               </div>
             </div>
             <div className="metric-card">
@@ -135,9 +149,16 @@ export function AnalyticsScreen() {
             </div>
             <div className="stat-panel">
               <h4>Doanh thu trung bình / đơn</h4>
-              <p className="avg-value">
+              <p
+                className="avg-value"
+                title={
+                  data.confirmedOrders > 0
+                    ? fmtVnd(Math.round(data.totalRevenue / data.confirmedOrders))
+                    : "—"
+                }
+              >
                 {data.confirmedOrders > 0
-                  ? fmtVnd(Math.round(data.totalRevenue / data.confirmedOrders))
+                  ? fmtVndCompact(Math.round(data.totalRevenue / data.confirmedOrders))
                   : "—"}
               </p>
             </div>
@@ -145,9 +166,9 @@ export function AnalyticsScreen() {
               <h4>Thông tin báo cáo</h4>
               <table className="info-table">
                 <tbody>
-                  <tr><td>Từ ngày</td><td>{data.fromDate}</td></tr>
-                  <tr><td>Đến ngày</td><td>{data.toDate}</td></tr>
-                  <tr><td>Tạo lúc</td><td>{new Date(data.generatedAt).toLocaleString("vi-VN")}</td></tr>
+                  <tr><td>Từ ngày</td><td>{fmtDate(data.fromDate)}</td></tr>
+                  <tr><td>Đến ngày</td><td>{fmtDate(data.toDate)}</td></tr>
+                  <tr><td>Tạo lúc</td><td>{fmtDateTime(data.generatedAt)}</td></tr>
                 </tbody>
               </table>
             </div>
