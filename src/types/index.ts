@@ -429,8 +429,26 @@ export interface ShiftSummaryResponse {
   totalBills: number;
 }
 
-/** GET /orders/{orderId}/invoice — JSON invoice payload */
-export type OrderInvoiceJson = Record<string, unknown>;
+/** GET /payments/orders/{orderId}/invoice — invoice payload (matches backend InvoiceResponse) */
+export interface OrderInvoiceItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface OrderInvoiceJson {
+  orderId: number;
+  invoiceNumber: string;
+  items: OrderInvoiceItem[];
+  subtotal: number;
+  tax: number;
+  discount: number;
+  total: number;
+  paymentMethod: string;
+  paymentTime: string | null;
+  cashierId: number | null;
+}
 
 // ─── AI Features ───────────────────────────────────────────────────────────────
 

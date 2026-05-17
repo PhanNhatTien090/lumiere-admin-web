@@ -7,6 +7,7 @@ import { orderAPI, paymentAPI, publicMenuAPI, shiftAPI } from "@/api/endpoints";
 import { OrderItemResponse, OrderResponse, PaymentMethod, PaymentProvider, PaymentResponse, ShiftResponse, ShiftSummaryResponse } from "@/types";
 import { useAdminStore } from "@/store/adminStore";
 import { fmtDateTime as fmtTime } from "@/utils/format";
+import { InvoiceExport } from "./InvoiceExport";
 
 function fmtVnd(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n) + "đ";
@@ -15,41 +16,6 @@ function fmtVnd(n: number) {
 function parseMoneyInput(raw: string): number {
   const n = Number(raw.replace(/\s/g, "").replace(/\./g, "").replace(",", "."));
   return Number.isFinite(n) ? n : NaN;
-}
-
-// ─── Xuất invoice JSON ─────────────────────────────────────────────────────────
-function InvoiceJsonExport({ orderId, compact }: { orderId: number; compact?: boolean }) {
-  const [busy, setBusy] = useState(false);
-
-  const run = async () => {
-    setBusy(true);
-    try {
-      const res = await orderAPI.getInvoiceJson(orderId);
-      const body = JSON.stringify(res.data.data, null, 2);
-      const blob = new Blob([body], { type: "application/json;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `invoice-order-${orderId}.json`;
-      a.click();
-      URL.revokeObjectURL(url);
-    } catch (e: any) {
-      alert(e.response?.data?.message || "Không tải được hóa đơn JSON");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <button
-      type="button"
-      className={compact ? "btn-small" : "btn-secondary"}
-      disabled={busy}
-      onClick={() => void run()}
-    >
-      {busy ? "…" : compact ? "📄 JSON" : "📄 Xuất hóa đơn JSON"}
-    </button>
-  );
 }
 
 // ─── Order Item list ───────────────────────────────────────────────────────────
@@ -675,7 +641,10 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
               <OrderItems items={selected.items || []} menuItemNames={menuItemNames} />
               <div className="detail-divider" />
               <div className="header-actions" style={{ marginBottom: 12 }}>
-                <InvoiceJsonExport orderId={selected.id} />
+                <InvoiceExport
+                  orderId={selected.id}
+                  tableLabel={`Bàn ${selected.tableCode || selected.tableId}`}
+                />
               </div>
               {!currentShift && (
                 <div className="alert-error" style={{ marginBottom: 8 }}>
@@ -755,7 +724,7 @@ function HistoryScreen() {
               <th>Số món</th>
               <th>Tổng tiền</th>
               <th>Thanh toán lúc</th>
-              <th>Hóa đơn JSON</th>
+              <th>Hóa đơn</th>
               {staff?.role === "MANAGER" && <th>Hoàn tiền</th>}
             </tr>
           </thead>
@@ -768,7 +737,11 @@ function HistoryScreen() {
                 <td className="gold">{fmtVnd(order.totalAmount)}</td>
                 <td>{order.paidAt ? fmtTime(order.paidAt) : "—"}</td>
                 <td>
-                  <InvoiceJsonExport orderId={order.id} compact />
+                  <InvoiceExport
+                    orderId={order.id}
+                    tableLabel={order.tableCode || `Bàn ${order.tableId}`}
+                    compact
+                  />
                 </td>
                 {staff?.role === "MANAGER" && (
                   <td>
