@@ -9,6 +9,7 @@ import {
   RobotOutlined,
 } from "@ant-design/icons";
 import { PortalLayout } from "@/components/layout/PortalLayout";
+import { useLowStockStore } from "@/store/lowStockStore";
 import { AnalyticsScreen } from "./screens/AnalyticsScreen";
 import { RevenueScreen } from "./screens/RevenueScreen";
 import { MenuScreen } from "./screens/MenuScreen";
@@ -21,6 +22,8 @@ type AdminTab = "analytics" | "revenue" | "menu" | "tables" | "staff" | "invento
 
 export function AdminPortal() {
   const [tab, setTab] = useState<AdminTab>("analytics");
+  const lowStockUnread = useLowStockStore((s) => s.unreadCount);
+  const markLowStockRead = useLowStockStore((s) => s.markAllRead);
 
   const navItems = [
     { id: "analytics", label: "Thống kê",      icon: <BarChartOutlined /> },
@@ -28,9 +31,14 @@ export function AdminPortal() {
     { id: "menu",      label: "Quản lý Menu",   icon: <AppstoreOutlined /> },
     { id: "tables",    label: "Bàn & QR",       icon: <TableOutlined /> },
     { id: "staff",     label: "Nhân viên",      icon: <TeamOutlined /> },
-    { id: "inventory", label: "Kho hàng",       icon: <InboxOutlined /> },
+    { id: "inventory", label: "Kho hàng",       icon: <InboxOutlined />,   badge: lowStockUnread },
     { id: "ai",        label: "AI Dashboard",   icon: <RobotOutlined /> },
   ];
+
+  const handleTabChange = (next: string) => {
+    setTab(next as AdminTab);
+    if (next === "inventory") markLowStockRead();
+  };
 
   return (
     <PortalLayout
@@ -38,7 +46,7 @@ export function AdminPortal() {
       subtitle="MANAGER"
       navItems={navItems}
       activeTab={tab}
-      onTabChange={(t) => setTab(t as AdminTab)}
+      onTabChange={handleTabChange}
     >
       {tab === "analytics" && <AnalyticsScreen />}
       {tab === "revenue"   && <RevenueScreen />}

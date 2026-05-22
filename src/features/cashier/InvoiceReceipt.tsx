@@ -22,6 +22,7 @@ interface InvoiceReceiptProps {
 export const InvoiceReceipt = forwardRef<HTMLDivElement, InvoiceReceiptProps>(
   ({ invoice, tableLabel }, ref) => {
     const methodLabel = PAYMENT_METHOD_LABEL[invoice.paymentMethod] || invoice.paymentMethod || "—";
+    const brand = invoice.restaurantName?.trim() || "LUMIÈRE";
     return (
       <div
         ref={ref}
@@ -37,9 +38,14 @@ export const InvoiceReceipt = forwardRef<HTMLDivElement, InvoiceReceiptProps>(
         }}
       >
         <div style={{ textAlign: "center", marginBottom: 10 }}>
-          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 1 }}>LUMIÈRE</div>
-          <div style={{ fontSize: 11 }}>NHÀ HÀNG LUMIÈRE</div>
-          <div style={{ fontSize: 10, color: "#333" }}>Hóa đơn thanh toán</div>
+          <div style={{ fontSize: 16, fontWeight: 700, letterSpacing: 1 }}>{brand.toUpperCase()}</div>
+          {invoice.restaurantAddress && (
+            <div style={{ fontSize: 10, color: "#222", marginTop: 2 }}>{invoice.restaurantAddress}</div>
+          )}
+          {invoice.restaurantHotline && (
+            <div style={{ fontSize: 10, color: "#222" }}>Hotline: {invoice.restaurantHotline}</div>
+          )}
+          <div style={{ fontSize: 10, color: "#333", marginTop: 4 }}>Hóa đơn thanh toán</div>
         </div>
 
         <Divider />
@@ -48,7 +54,12 @@ export const InvoiceReceipt = forwardRef<HTMLDivElement, InvoiceReceiptProps>(
         <Row label="Đơn #:" value={String(invoice.orderId)} />
         {tableLabel && <Row label="Bàn:" value={tableLabel} />}
         <Row label="Thời gian:" value={fmtDateTime(invoice.paymentTime)} />
-        {invoice.cashierId != null && <Row label="Thu ngân:" value={`#${invoice.cashierId}`} />}
+        {(invoice.cashierName || invoice.cashierId != null) && (
+          <Row
+            label="Thu ngân:"
+            value={invoice.cashierName || `#${invoice.cashierId}`}
+          />
+        )}
 
         <Divider />
 

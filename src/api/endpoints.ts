@@ -17,8 +17,10 @@ import {
   UpdateStaffRequest,
   CreatePaymentRequest,
   PaymentResponse,
+  PaymentRequestResponse,
   PaymentStatusResponse,
   RefundRequest,
+  RefundResponse,
   AnalyticsSummary,
   RevenueDetailResponse,
   RevenueGroupBy,
@@ -44,6 +46,8 @@ import {
   TaxConfigResponse,
   TaxConfigUpdateRequest,
   MenuItemPricingPreviewResponse,
+  RecipeItem,
+  UpsertRecipeRequest,
 } from "@/types";
 import { v4 as uuidv4 } from "uuid";
 
@@ -143,9 +147,9 @@ export const categoryAPI = {
 
 // ─── Menu Items (MANAGER) ───────────────────────────────────────────────────────
 export const menuItemAPI = {
-  /** GET /menu/items — requires categoryId (WAITER, MANAGER) */
+  /** GET /manager/menu/items — returns ALL items in category including unavailable ones */
   list: (categoryId: number) =>
-    axiosInstance.get<ApiResponse<MenuItemResponse[]>>("/menu/items", {
+    axiosInstance.get<ApiResponse<MenuItemResponse[]>>("/manager/menu/items", {
       params: { categoryId },
     }),
   create: (data: CreateMenuItemRequest) =>
@@ -185,6 +189,19 @@ export const menuItemAPI = {
     axiosInstance.put<ApiResponse<any>>(
       `/manager/menu/items/${id}/combo/pick`,
       data,
+    ),
+  getRecipe: (id: number) =>
+    axiosInstance.get<ApiResponse<RecipeItem[]>>(
+      `/manager/menu/items/${id}/recipe`,
+    ),
+  upsertRecipe: (id: number, data: UpsertRecipeRequest) =>
+    axiosInstance.put<ApiResponse<RecipeItem[]>>(
+      `/manager/menu/items/${id}/recipe`,
+      data,
+    ),
+  deleteRecipe: (id: number) =>
+    axiosInstance.delete<ApiResponse<void>>(
+      `/manager/menu/items/${id}/recipe`,
     ),
   uploadImage: (id: number, file: File) => {
     const form = new FormData();
@@ -422,12 +439,72 @@ export const paymentAPI = {
     ),
   refundPayment: (paymentId: number, data: RefundRequest) => {
     const key = uuidv4();
-    return axiosInstance.post<ApiResponse<PaymentResponse>>(
+    return axiosInstance.post<ApiResponse<RefundResponse>>(
       `/payments/${paymentId}/refund`,
       data,
       { headers: { "X-Idempotency-Key": key } },
     );
   },
+  /** POST /payments/{id}/confirm — manual confirmation for CASH or VIETQR. */
+  confirmManualPayment: (paymentId: number) =>
+    axiosInstance.post<ApiResponse<PaymentResponse>>(
+      `/payments/${paymentId}/confirm`,
+    ),
+  /** POST /payments/{id}/cancel — cashier abandons / switches method. */
+  cancelPendingPayment: (paymentId: number, reason?: string) =>
+    axiosInstance.post<ApiResponse<PaymentResponse>>(
+      `/payments/${paymentId}/cancel`,
+      { reason: reason ?? "CANCELLED_BY_CASHIER" },
+    ),
+  /** POST /payments/refunds/{refundId}/confirm — cashier confirms cash handed over / manual transfer done. */
+  confirmRefund: (refundId: number) =>
+    axiosInstance.post<ApiResponse<RefundResponse>>(
+      `/payments/refunds/${refundId}/confirm`,
+    ),
+  /** POST /payments/refunds/{refundId}/cancel — cashier abandons a PENDING refund. */
+  cancelRefund: (refundId: number, reason?: string) =>
+    axiosInstance.post<ApiResponse<RefundResponse>>(
+      `/payments/refunds/${refundId}/cancel`,
+      { reason: reason ?? "CANCELLED_BY_CASHIER" },
+    ),
+  /** GET /payments/orders/{orderId}/refunds — refund history for one order. */
+  listOrderRefunds: (orderId: number) =>
+    axiosInstance.get<ApiResponse<RefundResponse[]>>(
+      `/payments/orders/${orderId}/refunds`,
+    ),
+};
+
+// ─── Payment Requests (Khách yêu cầu thanh toán) ───────────────────────
+export const paymentRequestAPI = {
+  /** GET /payment-requests?status=REQUESTED,ACKNOWLEDGED */
+  list: (statuses?: ("REQUESTED" | "ACKNOWLEDGED" | "COMPLETED" | "CANCELLED")[]) =>
+    axiosInstance.get<ApiResponse<PaymentRequestResponse[]>>("/payment-requests", {
+      params: statuses && statuses.length > 0 ? { status: statuses.join(",") } : undefined,
+    }),
+  acknowledge: (id: number) =>
+    axiosInstance.post<ApiResponse<PaymentRequestResponse>>(
+      `/payment-requests/${id}/acknowledge`,
+    ),
+  cancel: (id: number, reason?: string) =>
+    axiosInstance.post<ApiResponse<PaymentRequestResponse>>(
+      `/payment-requests/${id}/cancel`,
+      { reason: reason ?? "CANCELLED_BY_CASHIER" },
+    ),
+};
+
+// ─── Kitchen menu (Báo hết món) ─────────────────────────────────────────────────
+export const kitchenMenuAPI = {
+  /** POST /kitchen/menu-items/{id}/mark-unavailable — bếp/manager tắt món. */
+  markUnavailable: (menuItemId: number, reason?: string) =>
+    axiosInstance.post<ApiResponse<unknown>>(
+      `/kitchen/menu-items/${menuItemId}/mark-unavailable`,
+      { reason },
+    ),
+  /** POST /manager/menu/items/{id}/mark-available — manager bật lại món. */
+  markAvailable: (menuItemId: number) =>
+    axiosInstance.post<ApiResponse<unknown>>(
+      `/manager/menu/items/${menuItemId}/mark-available`,
+    ),
 };
 
 // ─── Analytics (MANAGER) ────────────────────────────────────────────────────────

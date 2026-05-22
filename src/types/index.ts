@@ -143,6 +143,19 @@ export interface UpsertPickComboRequest {
   slots: PickComboSlot[];
 }
 
+export type IngredientUnit = "G" | "ML" | "UNIT";
+
+export interface RecipeItem {
+  ingredientId: number;
+  ingredientName: string;
+  unit: IngredientUnit;
+  quantity: number;
+}
+
+export interface UpsertRecipeRequest {
+  items: Array<{ ingredientId: number; quantity: number }>;
+}
+
 export interface MenuItemDetailResponse extends MenuItemResponse {
   itemTaxMode?: TaxMode | null;
   itemTaxRateBps?: number | null;
@@ -223,7 +236,7 @@ export interface OrderResponse {
 
 // ─── Payment ───────────────────────────────────────────────────────────────────
 export type PaymentMethod = "CASH" | "QR_CODE" | "VNPAY_ATM";
-export type PaymentProvider = "CASH" | "VNPAY";
+export type PaymentProvider = "CASH" | "VNPAY" | "VIETQR";
 export type PaymentStatus = "INITIATED" | "PENDING" | "PAID" | "FAILED" | "REFUNDED";
 
 export interface CreatePaymentRequest {
@@ -267,6 +280,38 @@ export interface PaymentStatusResponse {
 export interface RefundRequest {
   amount: number;
   reason: string;
+}
+
+export type PaymentRequestStatus = "REQUESTED" | "ACKNOWLEDGED" | "COMPLETED" | "CANCELLED";
+export type PaymentRequestMethod = "CASH" | "TRANSFER";
+
+export interface PaymentRequestResponse {
+  id: number;
+  orderId: number;
+  tableCode: string;
+  preferredMethod: PaymentRequestMethod;
+  status: PaymentRequestStatus;
+  acknowledgedBy: number | null;
+  acknowledgedByName: string | null;
+  cancelledReason: string | null;
+  createdAt: string;
+  acknowledgedAt: string | null;
+  completedAt: string | null;
+}
+
+export type RefundStatus = "INITIATED" | "PENDING" | "SUCCESS" | "FAILED";
+
+export interface RefundResponse {
+  id: number;
+  paymentId: number;
+  amount: number;
+  reason: string | null;
+  status: RefundStatus;
+  providerRefundId: string | null;
+  requestedBy: number | null;
+  requestedByName: string | null;
+  createdAt: string;
+  completedAt: string | null;
 }
 
 // ─── Analytics ─────────────────────────────────────────────────────────────────
@@ -448,6 +493,10 @@ export interface OrderInvoiceJson {
   paymentMethod: string;
   paymentTime: string | null;
   cashierId: number | null;
+  cashierName: string | null;
+  restaurantName: string | null;
+  restaurantAddress: string | null;
+  restaurantHotline: string | null;
 }
 
 // ─── AI Features ───────────────────────────────────────────────────────────────

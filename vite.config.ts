@@ -4,6 +4,10 @@ import path from "path";
 
 export default defineConfig({
   plugins: [react()],
+  // sockjs-client expects Node's `global`; remap to browser `globalThis`.
+  define: {
+    global: "globalThis",
+  },
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
@@ -19,6 +23,8 @@ export default defineConfig({
         manualChunks: {
           "vendor-antd": ["antd", "@ant-design/icons"],
           "vendor-react": ["react", "react-dom", "react-router-dom"],
+          "vendor-pdf": ["jspdf", "html2canvas"],
+          "vendor-ws": ["@stomp/stompjs", "sockjs-client"],
         },
       },
     },

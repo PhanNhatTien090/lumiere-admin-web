@@ -122,8 +122,17 @@ input[type=file]{padding:8px 12px;}
 .portal-content{
   background:#faf8f3;padding:24px 28px;
   overflow-y:auto;
+  color:#374151;
   font-family:'DM Sans',Inter,system-ui,sans-serif;
 }
+/* Native form controls don't reliably inherit body color across browsers,
+   especially on a cream portal background. Force readable defaults. */
+.portal-content input,
+.portal-content select,
+.portal-content textarea,
+.portal-content option{color:#1f2937;}
+.portal-content input::placeholder,
+.portal-content textarea::placeholder{color:#9ca3af;}
 
 /* ─── Screens ─── */
 .screen{max-width:1200px;}
@@ -255,6 +264,35 @@ input[type=file]{padding:8px 12px;}
 .stat-panel{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:18px;}
 .stat-panel h4{font-size:13px;font-weight:600;color:#374151;margin-bottom:12px;}
 
+/* ── Stat card mini (Cashier shift summary, close result) ── */
+.stat-card-mini{
+  display:flex;flex-direction:column;gap:4px;
+  padding:12px 14px;background:#fff;
+  border:1px solid #e5e7eb;border-radius:10px;
+}
+.stat-card-mini .stat-label{
+  font-size:11px;font-weight:600;color:#6b7280;
+  text-transform:uppercase;letter-spacing:.4px;
+}
+.stat-card-mini .stat-value{
+  font-size:18px;font-weight:700;color:#1f2937;line-height:1.25;
+}
+.stat-card-mini .stat-value.gold{color:#a87d00;}
+.stat-card-warning{
+  background:#fffbeb;border-color:#fde68a;
+}
+.stat-card-warning .stat-value{color:#92400e;}
+
+/* ── Empty-state mini (inline, for sections that already have a card) ── */
+.empty-state-mini{
+  padding:20px;text-align:center;
+  color:#6b7280;font-size:13px;font-style:italic;
+  background:#f9fafb;border:1px dashed #e5e7eb;border-radius:8px;
+}
+
+/* Generic gold accent used inside data tables (e.g. order total) */
+td.gold,.text-gold{color:#a87d00;font-weight:600;}
+
 .rate-bar-wrap{height:10px;background:#f3f4f6;border-radius:99px;overflow:hidden;margin-bottom:8px;}
 .rate-bar{height:100%;border-radius:99px;transition:width .6s;}
 .rate-label{font-size:13px;color:#6b7280;}
@@ -267,7 +305,7 @@ input[type=file]{padding:8px 12px;}
 .menu-layout{display:grid;grid-template-columns:200px 1fr;gap:16px;}
 
 .cat-sidebar{background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px;align-self:start;}
-.cat-sidebar h4{font-size:11px;font-weight:600;color:#9ca3af;letter-spacing:1px;margin-bottom:10px;}
+.cat-sidebar h4{font-size:11px;font-weight:600;color:#6b7280;letter-spacing:1px;margin-bottom:10px;}
 .cat-btn{
   display:block;width:100%;text-align:left;padding:9px 10px;
   background:transparent;color:#4b5563;border:0;cursor:pointer;border-radius:7px;
@@ -310,7 +348,7 @@ input[type=file]{padding:8px 12px;}
   background:#dbeafe;color:#1d4ed8;
 }
 .item-type-badge.combo{background:#fce7f3;color:#be185d;}
-.item-info small{font-size:12px;color:#9ca3af;display:block;margin-bottom:8px;}
+.item-info small{font-size:12px;color:#6b7280;display:block;margin-bottom:8px;}
 .item-footer{display:flex;justify-content:space-between;align-items:center;}
 .item-price{font-size:15px;font-weight:700;color:#d4ad34;}
 .item-actions{display:flex;gap:4px;}
@@ -372,7 +410,7 @@ input[type=file]{padding:8px 12px;}
 .status-badge.inactive{background:#fee2e2;color:#dc2626;}
 
 .row-actions{display:flex;gap:6px;}
-.empty-cell{text-align:center;color:#9ca3af;padding:32px!important;}
+.empty-cell{text-align:center;color:#6b7280;padding:32px!important;}
 
 /* ─── Inventory ─── */
 .low-stock-alert{

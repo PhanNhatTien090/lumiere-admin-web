@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import html2canvas from "html2canvas";
 import { jsPDF } from "jspdf";
@@ -90,13 +90,13 @@ async function exportPdf(invoice: OrderInvoiceJson, tableLabel?: string) {
 
 export function InvoiceExport({ orderId, tableLabel, compact }: InvoiceExportProps) {
   const [busy, setBusy] = useState<ExportFormat | null>(null);
-  const cacheRef = useRef<OrderInvoiceJson | null>(null);
 
+  // Always fetch fresh — invoice content can change between reprints (payment
+  // method finalised, cashier filled in, etc.). The previous useRef cache made
+  // post-payment reprints show stale "—" placeholders.
   const fetchInvoice = async (): Promise<OrderInvoiceJson> => {
-    if (cacheRef.current) return cacheRef.current;
     const res = await orderAPI.getInvoiceJson(orderId);
-    cacheRef.current = res.data.data;
-    return cacheRef.current;
+    return res.data.data;
   };
 
   const run = async (format: ExportFormat) => {

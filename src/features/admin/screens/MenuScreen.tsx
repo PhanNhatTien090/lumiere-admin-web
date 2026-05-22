@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { categoryAPI, menuItemAPI, taxAPI } from "@/api/endpoints";
+import { categoryAPI, menuItemAPI, taxAPI, kitchenMenuAPI } from "@/api/endpoints";
 import {
   ManagerMenuCategoryListItemResponse,
   MenuItemResponse,
@@ -9,6 +9,7 @@ import {
   ComboKind,
   ItemType,
 } from "@/types";
+import { useMenuAvailabilityStore } from "@/store/menuAvailabilityStore";
 
 function fmtVnd(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n) + "đ";
@@ -680,6 +681,24 @@ function MenuItemForm({ initial, categories, items, onSave, onClose }: {
   );
 }
 
+// ─── Availability helpers ──────────────────────────────────────────────────────
+type AvailabilityStatus = "OK" | "INGREDIENT_OUT" | "DISABLED";
+
+function getAvailabilityStatus(item: MenuItemResponse): AvailabilityStatus {
+  if (!item.available) return "DISABLED";
+  if (item.ingredientSufficient === false) return "INGREDIENT_OUT";
+  return "OK";
+}
+
+const AVAILABILITY_META: Record<
+  AvailabilityStatus,
+  { label: string; bg: string; color: string; border: string }
+> = {
+  OK: { label: "✅ Đang phục vụ", bg: "#dcfce7", color: "#15803d", border: "#86efac" },
+  INGREDIENT_OUT: { label: "⚠️ Hết nguyên liệu", bg: "#fef3c7", color: "#92400e", border: "#fde68a" },
+  DISABLED: { label: "🚫 Đã tắt", bg: "#fee2e2", color: "#dc2626", border: "#fca5a5" },
+};
+
 // ─── Main MenuScreen ───────────────────────────────────────────────────────────
 export function MenuScreen() {
   const [categories, setCategories] = useState<ManagerMenuCategoryListItemResponse[]>([]);
@@ -693,6 +712,10 @@ export function MenuScreen() {
   const [itemModal, setItemModal] = useState<"create" | "edit" | null>(null);
   const [editItem, setEditItem] = useState<MenuItemResponse | undefined>();
   const [search, setSearch] = useState("");
+  const [availabilityFilter, setAvailabilityFilter] = useState<"ALL" | AvailabilityStatus>("ALL");
+  const [toggleBusyId, setToggleBusyId] = useState<number | null>(null);
+
+  const lastAvailabilityEvent = useMenuAvailabilityStore((s) => s.lastEvent);
 
   const load = async () => {
     setLoading(true); setError(null);
@@ -719,6 +742,64 @@ export function MenuScreen() {
 
   useEffect(() => { load(); }, []);
 
+  // Patch local items in-place when a STOMP availability delta arrives —
+  // avoids a full menu refetch for every kitchen action / stock import.
+  useEffect(() => {
+    if (!lastAvailabilityEvent || lastAvailabilityEvent.updates.length === 0) return;
+    const byId = new Map(lastAvailabilityEvent.updates.map((u) => [u.menuItemId, u]));
+    setItems((prev) =>
+      prev.map((it) => {
+        const upd = byId.get(it.id);
+        if (!upd) return it;
+        return {
+          ...it,
+          available: upd.available,
+          ingredientSufficient: upd.ingredientSufficient,
+        };
+      }),
+    );
+  }, [lastAvailabilityEvent]);
+
+  const toggleAvailability = async (item: MenuItemResponse) => {
+    const status = getAvailabilityStatus(item);
+    if (toggleBusyId === item.id) return;
+
+    if (status === "DISABLED") {
+      // Mở lại món — manager only endpoint
+      if (!confirm(`Mở lại món "${item.name}"?`)) return;
+      setToggleBusyId(item.id);
+      try {
+        await kitchenMenuAPI.markAvailable(item.id);
+        // Optimistic patch; STOMP delta will arrive too and confirm
+        setItems((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, available: true } : it)),
+        );
+      } catch (e: any) {
+        alert(e.response?.data?.message || "Không mở lại được món");
+      } finally {
+        setToggleBusyId(null);
+      }
+    } else {
+      const reason = prompt(`Tắt món "${item.name}". Nhập lý do (bắt buộc):`, "");
+      if (reason === null) return;
+      if (!reason.trim()) {
+        alert("Vui lòng nhập lý do tắt món để lưu lịch sử.");
+        return;
+      }
+      setToggleBusyId(item.id);
+      try {
+        await kitchenMenuAPI.markUnavailable(item.id, reason.trim());
+        setItems((prev) =>
+          prev.map((it) => (it.id === item.id ? { ...it, available: false } : it)),
+        );
+      } catch (e: any) {
+        alert(e.response?.data?.message || "Không tắt được món");
+      } finally {
+        setToggleBusyId(null);
+      }
+    }
+  };
+
   const deleteCategory = async (cat: ManagerMenuCategoryListItemResponse) => {
     if (!confirm(`Xoá danh mục "${cat.name}"? Các món trong danh mục cũng sẽ bị ảnh hưởng.`)) return;
     try {
@@ -742,15 +823,26 @@ export function MenuScreen() {
   const filteredItems = items.filter(item => {
     const matchCat = selectedCat === null || item.categoryId === selectedCat;
     const matchSearch = item.name.toLowerCase().includes(search.toLowerCase());
-    return matchCat && matchSearch;
+    const matchStatus =
+      availabilityFilter === "ALL" || getAvailabilityStatus(item) === availabilityFilter;
+    return matchCat && matchSearch && matchStatus;
   });
+
+  const disabledCount = items.filter((i) => !i.available).length;
+  const insufficientCount = items.filter(
+    (i) => i.available && i.ingredientSufficient === false,
+  ).length;
 
   return (
     <div className="screen">
       <header className="screen-header">
         <div>
           <h2>Quản lý <span>Menu</span></h2>
-          <p>{items.length} món · {categories.length} danh mục</p>
+          <p>
+            {items.length} món · {categories.length} danh mục
+            {disabledCount > 0 && ` · 🚫 ${disabledCount} đang tắt`}
+            {insufficientCount > 0 && ` · ⚠️ ${insufficientCount} hết NL`}
+          </p>
         </div>
         <div className="header-actions">
           <button className="btn-secondary" onClick={() => { setCatModal("create"); setEditCat(undefined); }}>
@@ -801,40 +893,106 @@ export function MenuScreen() {
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {(["ALL", "OK", "INGREDIENT_OUT", "DISABLED"] as const).map((f) => {
+              const active = availabilityFilter === f;
+              const label =
+                f === "ALL"
+                  ? `Tất cả (${items.length})`
+                  : f === "OK"
+                    ? `✅ Đang phục vụ (${items.length - disabledCount - insufficientCount})`
+                    : f === "INGREDIENT_OUT"
+                      ? `⚠️ Hết NL (${insufficientCount})`
+                      : `🚫 Đã tắt (${disabledCount})`;
+              return (
+                <button
+                  key={f}
+                  type="button"
+                  onClick={() => setAvailabilityFilter(f)}
+                  style={{
+                    padding: "4px 10px",
+                    borderRadius: 16,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    border: active ? "1.5px solid #d4ad34" : "1px solid #e5e7eb",
+                    background: active ? "rgba(212,173,52,0.12)" : "#f9fafb",
+                    color: active ? "#a87d00" : "#374151",
+                    fontWeight: active ? 600 : 400,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
           {loading && <div className="loading-state">Đang tải...</div>}
           <div className="item-grid">
-            {filteredItems.map(item => (
-              <div key={item.id} className="item-card">
-                {item.imageUrl ? (
-                  <img src={item.imageUrl} alt={item.name} className="item-img" />
-                ) : (
-                  <div className="item-img-placeholder">🍽️</div>
-                )}
-                <div className="item-info">
-                  <div className="item-header">
-                    <strong>{item.name}</strong>
-                    <div style={{ display: "flex", gap: 4 }}>
-                      <span className={`item-type-badge ${item.itemType.toLowerCase()}`}>
-                        {item.itemType}
-                      </span>
-                      {item.itemType === "COMBO" && item.comboKind && (
-                        <span className="item-type-badge" style={{ background: "#f3e8c0", color: "#8a6a00" }}>
-                          {item.comboKind}
+            {filteredItems.map(item => {
+              const status = getAvailabilityStatus(item);
+              const meta = AVAILABILITY_META[status];
+              const busy = toggleBusyId === item.id;
+              const isDisabled = status === "DISABLED";
+              return (
+                <div key={item.id} className="item-card" style={isDisabled ? { opacity: 0.75 } : undefined}>
+                  {item.imageUrl ? (
+                    <img src={item.imageUrl} alt={item.name} className="item-img" style={isDisabled ? { filter: "grayscale(0.6)" } : undefined} />
+                  ) : (
+                    <div className="item-img-placeholder">🍽️</div>
+                  )}
+                  <div className="item-info">
+                    <div className="item-header">
+                      <strong>{item.name}</strong>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <span className={`item-type-badge ${item.itemType.toLowerCase()}`}>
+                          {item.itemType}
                         </span>
-                      )}
+                        {item.itemType === "COMBO" && item.comboKind && (
+                          <span className="item-type-badge" style={{ background: "#f3e8c0", color: "#8a6a00" }}>
+                            {item.comboKind}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
-                  <small>{item.description || "Không có mô tả"}</small>
-                  <div className="item-footer">
-                    <b className="item-price">{fmtVnd(item.price)}</b>
-                    <div className="item-actions">
-                      <button title="Sửa" onClick={() => { setEditItem(item); setItemModal("edit"); }}>✏️</button>
-                      <button title="Xoá" onClick={() => deleteItem(item)}>🗑️</button>
+                    <div style={{ marginBottom: 6 }}>
+                      <span
+                        style={{
+                          display: "inline-block",
+                          padding: "2px 8px",
+                          borderRadius: 12,
+                          fontSize: 11,
+                          fontWeight: 600,
+                          background: meta.bg,
+                          color: meta.color,
+                          border: `1px solid ${meta.border}`,
+                        }}
+                      >
+                        {meta.label}
+                      </span>
+                    </div>
+                    <small>{item.description || "Không có mô tả"}</small>
+                    <div className="item-footer">
+                      <b className="item-price">{fmtVnd(item.price)}</b>
+                      <div className="item-actions">
+                        <button
+                          title={isDisabled ? "Mở lại món" : "Tắt món"}
+                          onClick={() => toggleAvailability(item)}
+                          disabled={busy}
+                          style={{
+                            fontSize: 13,
+                            cursor: busy ? "wait" : "pointer",
+                            opacity: busy ? 0.5 : 1,
+                          }}
+                        >
+                          {busy ? "⏳" : isDisabled ? "🔓" : "⛔"}
+                        </button>
+                        <button title="Sửa" onClick={() => { setEditItem(item); setItemModal("edit"); }}>✏️</button>
+                        <button title="Xoá" onClick={() => deleteItem(item)}>🗑️</button>
+                      </div>
                     </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
             {filteredItems.length === 0 && !loading && (
               <div className="empty-state">Không có món nào phù hợp</div>
             )}

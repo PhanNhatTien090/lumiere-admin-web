@@ -16,8 +16,7 @@
     "noImplicitReturns": false,
     "forceConsistentCasingInFileNames": true,
     "resolveJsonModule": true,
-    // "outDir": "./dist-types",
-    // "baseUrl": ".",
+    "noEmit": true,
     "paths": {
       "@/*": ["./src/*"]
     }

@@ -1,7 +1,14 @@
-import { useState, useEffect } from "react";
-import { inventoryAPI } from "@/api/endpoints";
-import { InventoryItem, InventoryTransaction } from "@/types";
+import { useState, useEffect, useMemo } from "react";
+import { inventoryAPI, categoryAPI, menuItemAPI } from "@/api/endpoints";
+import {
+  InventoryItem,
+  InventoryTransaction,
+  MenuItemResponse,
+  ManagerMenuCategoryListItemResponse,
+  RecipeItem,
+} from "@/types";
 import { fmtDateTime } from "@/utils/format";
+import { useMenuAvailabilityStore } from "@/store/menuAvailabilityStore";
 
 function Modal({
   title,
@@ -230,17 +237,519 @@ function TransactionForm({
   );
 }
 
+function RecipeManager({ items }: { items: InventoryItem[] }) {
+  const [categories, setCategories] = useState<
+    ManagerMenuCategoryListItemResponse[]
+  >([]);
+  const [menuItems, setMenuItems] = useState<MenuItemResponse[]>([]);
+  const [menuLoading, setMenuLoading] = useState(false);
+  const [menuError, setMenuError] = useState<string | null>(null);
+
+  const [selectedCatId, setSelectedCatId] = useState<number | null>(null);
+  const [selectedItemId, setSelectedItemId] = useState<number | null>(null);
+  const [search, setSearch] = useState("");
+
+  const [recipe, setRecipe] = useState<
+    Array<{ ingredientId: number; quantity: number }>
+  >([]);
+  const [recipeOriginal, setRecipeOriginal] = useState<
+    Array<{ ingredientId: number; quantity: number }>
+  >([]);
+  const [recipeLoading, setRecipeLoading] = useState(false);
+  const [recipeError, setRecipeError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [savedFlash, setSavedFlash] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setMenuLoading(true);
+      setMenuError(null);
+      try {
+        const catRes = await categoryAPI.list();
+        const cats = catRes.data.data ?? [];
+        if (cancelled) return;
+        setCategories(cats);
+        if (cats.length === 0) {
+          setMenuItems([]);
+          return;
+        }
+        const itemResults = await Promise.all(
+          cats.map((c) =>
+            menuItemAPI
+              .list(c.id)
+              .then((r) => r.data.data ?? [])
+              .catch(() => [] as MenuItemResponse[]),
+          ),
+        );
+        if (cancelled) return;
+        const flat = itemResults.flat();
+        setMenuItems(flat);
+        if (flat.length > 0 && selectedItemId === null) {
+          setSelectedItemId(flat[0].id);
+        }
+      } catch (e: any) {
+        if (!cancelled)
+          setMenuError(e.response?.data?.message || "Lỗi tải danh sách món");
+      } finally {
+        if (!cancelled) setMenuLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (selectedItemId === null) {
+      setRecipe([]);
+      setRecipeOriginal([]);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      setRecipeLoading(true);
+      setRecipeError(null);
+      try {
+        const res = await menuItemAPI.getRecipe(selectedItemId);
+        if (cancelled) return;
+        const next = (res.data.data ?? []).map((r: RecipeItem) => ({
+          ingredientId: r.ingredientId,
+          quantity: Number(r.quantity),
+        }));
+        setRecipe(next);
+        setRecipeOriginal(next);
+      } catch (e: any) {
+        if (cancelled) return;
+        if (e.response?.status === 404) {
+          // No recipe yet — start fresh
+          setRecipe([]);
+          setRecipeOriginal([]);
+        } else {
+          setRecipeError(e.response?.data?.message || "Lỗi tải công thức");
+        }
+      } finally {
+        if (!cancelled) setRecipeLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedItemId]);
+
+  const filteredMenuItems = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return menuItems.filter((it) => {
+      if (selectedCatId !== null && it.categoryId !== selectedCatId)
+        return false;
+      if (q && !it.name.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [menuItems, selectedCatId, search]);
+
+  const selectedItem = menuItems.find((it) => it.id === selectedItemId) ?? null;
+  const usedIngredientIds = new Set(recipe.map((r) => r.ingredientId));
+  const availableIngredients = items.filter(
+    (i) => !usedIngredientIds.has(i.id),
+  );
+
+  const dirty = useMemo(() => {
+    if (recipe.length !== recipeOriginal.length) return true;
+    const byId = new Map(
+      recipeOriginal.map((r) => [r.ingredientId, r.quantity]),
+    );
+    for (const r of recipe) {
+      const orig = byId.get(r.ingredientId);
+      if (orig === undefined || orig !== r.quantity) return true;
+    }
+    return false;
+  }, [recipe, recipeOriginal]);
+
+  const addIngredient = () => {
+    if (availableIngredients.length === 0) return;
+    setRecipe((r) => [
+      ...r,
+      { ingredientId: availableIngredients[0].id, quantity: 1 },
+    ]);
+  };
+
+  const updateRow = (
+    idx: number,
+    patch: Partial<{ ingredientId: number; quantity: number }>,
+  ) =>
+    setRecipe((rows) =>
+      rows.map((row, i) => (i === idx ? { ...row, ...patch } : row)),
+    );
+
+  const removeRow = (idx: number) =>
+    setRecipe((rows) => rows.filter((_, i) => i !== idx));
+
+  const save = async () => {
+    if (!selectedItemId) return;
+    setSaving(true);
+    setRecipeError(null);
+    try {
+      if (recipe.length === 0) {
+        await menuItemAPI.deleteRecipe(selectedItemId);
+        setRecipeOriginal([]);
+      } else {
+        for (const r of recipe) {
+          if (!(r.quantity > 0)) {
+            setRecipeError("Số lượng phải lớn hơn 0");
+            setSaving(false);
+            return;
+          }
+        }
+        const seen = new Set<number>();
+        for (const r of recipe) {
+          if (seen.has(r.ingredientId)) {
+            setRecipeError("Mỗi nguyên liệu chỉ được khai báo 1 lần");
+            setSaving(false);
+            return;
+          }
+          seen.add(r.ingredientId);
+        }
+        const res = await menuItemAPI.upsertRecipe(selectedItemId, {
+          items: recipe.map((r) => ({
+            ingredientId: r.ingredientId,
+            quantity: r.quantity,
+          })),
+        });
+        const next = (res.data.data ?? []).map((r) => ({
+          ingredientId: r.ingredientId,
+          quantity: Number(r.quantity),
+        }));
+        setRecipe(next);
+        setRecipeOriginal(next);
+      }
+      setSavedFlash(true);
+      setTimeout(() => setSavedFlash(false), 1500);
+    } catch (e: any) {
+      setRecipeError(e.response?.data?.message || "Lỗi lưu công thức");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (menuLoading) {
+    return <div className="loading-state">Đang tải danh sách món...</div>;
+  }
+  if (menuError) {
+    return <div className="alert-error">{menuError}</div>;
+  }
+  if (menuItems.length === 0) {
+    return (
+      <div className="empty-cell" style={{ padding: 32, textAlign: "center" }}>
+        Chưa có món nào. Hãy tạo món ở mục Menu trước khi cấu hình nguyên liệu.
+      </div>
+    );
+  }
+  if (items.length === 0) {
+    return (
+      <div className="empty-cell" style={{ padding: 32, textAlign: "center" }}>
+        Chưa có nguyên liệu nào trong kho. Hãy thêm nguyên liệu trước khi gán
+        cho món.
+      </div>
+    );
+  }
+
+  return (
+    <div
+      style={{
+        display: "grid",
+        gridTemplateColumns: "minmax(220px, 280px) 1fr",
+        gap: 16,
+        alignItems: "start",
+      }}
+    >
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 8,
+          padding: 10,
+          background: "#fff",
+          maxHeight: "70vh",
+          display: "flex",
+          flexDirection: "column",
+        }}
+      >
+        <input
+          className="search-input"
+          placeholder="🔍 Tìm món..."
+          value={search}
+          onChange={(e) => setSearch(e.target.value)}
+          style={{ marginBottom: 8 }}
+        />
+        <select
+          value={selectedCatId === null ? "" : String(selectedCatId)}
+          onChange={(e) =>
+            setSelectedCatId(e.target.value === "" ? null : +e.target.value)
+          }
+          style={{
+            width: "100%",
+            marginBottom: 8,
+            padding: "6px 8px",
+            fontSize: 13,
+            border: "1px solid #e5e7eb",
+            borderRadius: 6,
+            background: "#fff",
+          }}
+        >
+          <option value="">Tất cả danh mục ({menuItems.length})</option>
+          {categories.map((c) => {
+            const count = menuItems.filter((it) => it.categoryId === c.id).length;
+            return (
+              <option key={c.id} value={c.id}>
+                {c.name} ({count})
+              </option>
+            );
+          })}
+        </select>
+        <div style={{ overflowY: "auto", flex: 1 }}>
+          {filteredMenuItems.map((it) => {
+            const active = it.id === selectedItemId;
+            return (
+              <button
+                key={it.id}
+                type="button"
+                onClick={() => setSelectedItemId(it.id)}
+                style={{
+                  display: "block",
+                  width: "100%",
+                  textAlign: "left",
+                  padding: "8px 10px",
+                  marginBottom: 4,
+                  borderRadius: 6,
+                  border: active
+                    ? "1.5px solid #d4ad34"
+                    : "1px solid #e5e7eb",
+                  background: active ? "rgba(212,173,52,0.12)" : "#f9fafb",
+                  color: active ? "#a87d00" : "#374151",
+                  fontWeight: active ? 600 : 400,
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ fontSize: 13 }}>{it.name}</div>
+                <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                  {it.itemType}
+                  {it.itemType === "COMBO" && it.comboKind
+                    ? ` · ${it.comboKind}`
+                    : ""}
+                </div>
+              </button>
+            );
+          })}
+          {filteredMenuItems.length === 0 && (
+            <div
+              style={{
+                padding: 12,
+                fontSize: 12,
+                color: "#6b7280",
+                textAlign: "center",
+              }}
+            >
+              Không có món khớp.
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div
+        style={{
+          border: "1px solid #e5e7eb",
+          borderRadius: 8,
+          padding: 16,
+          background: "#fff",
+        }}
+      >
+        {!selectedItem ? (
+          <div style={{ color: "#9ca3af" }}>Chọn món ở bên trái để cấu hình.</div>
+        ) : (
+          <>
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                marginBottom: 8,
+              }}
+            >
+              <div>
+                <h3 style={{ margin: 0 }}>{selectedItem.name}</h3>
+                <small style={{ color: "#6b7280" }}>
+                  {selectedItem.itemType}
+                  {selectedItem.itemType === "COMBO" &&
+                    selectedItem.comboKind &&
+                    ` · ${selectedItem.comboKind}`}
+                  {" · "}công thức: {recipe.length} nguyên liệu
+                </small>
+              </div>
+              {savedFlash && (
+                <span style={{ color: "#15803d", fontSize: 12 }}>
+                  ✅ Đã lưu
+                </span>
+              )}
+            </div>
+
+            {selectedItem.itemType === "COMBO" && (
+              <div
+                style={{
+                  background: "#fffbeb",
+                  border: "1px solid #fde68a",
+                  color: "#92400e",
+                  padding: "8px 12px",
+                  borderRadius: 6,
+                  fontSize: 12,
+                  marginBottom: 12,
+                }}
+              >
+                ⚠️ Đây là combo. Thông thường công thức nguyên liệu được khai
+                báo trên từng món SINGLE thành phần.
+              </div>
+            )}
+
+            {recipeError && <div className="form-err">{recipeError}</div>}
+
+            {recipeLoading ? (
+              <div className="loading-state">Đang tải công thức...</div>
+            ) : (
+              <>
+                {recipe.length === 0 ? (
+                  <div
+                    style={{
+                      padding: 16,
+                      color: "#6b7280",
+                      textAlign: "center",
+                      border: "1px dashed #e5e7eb",
+                      borderRadius: 8,
+                      marginBottom: 12,
+                    }}
+                  >
+                    Chưa có nguyên liệu nào cho món này.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: 8, marginBottom: 12 }}>
+                    {recipe.map((row, idx) => {
+                      const ing = items.find((i) => i.id === row.ingredientId);
+                      const otherUsed = recipe
+                        .filter((_, i) => i !== idx)
+                        .map((r) => r.ingredientId);
+                      const optionItems = items.filter(
+                        (i) => !otherUsed.includes(i.id),
+                      );
+                      return (
+                        <div
+                          key={idx}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1fr 130px 80px 36px",
+                            gap: 8,
+                            alignItems: "center",
+                          }}
+                        >
+                          <select
+                            value={row.ingredientId}
+                            onChange={(e) =>
+                              updateRow(idx, { ingredientId: +e.target.value })
+                            }
+                          >
+                            {optionItems.map((opt) => (
+                              <option key={opt.id} value={opt.id}>
+                                {opt.name}
+                              </option>
+                            ))}
+                          </select>
+                          <input
+                            type="number"
+                            min={0}
+                            step="0.01"
+                            value={row.quantity}
+                            onChange={(e) =>
+                              updateRow(idx, { quantity: +e.target.value })
+                            }
+                          />
+                          <div style={{ fontSize: 12, color: "#6b7280" }}>
+                            {ing?.unit ?? ""}
+                          </div>
+                          <button
+                            type="button"
+                            className="btn-small danger"
+                            onClick={() => removeRow(idx)}
+                            title="Xoá"
+                          >
+                            🗑️
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+                <button
+                  type="button"
+                  className="btn-secondary"
+                  onClick={addIngredient}
+                  disabled={availableIngredients.length === 0}
+                >
+                  + Thêm nguyên liệu
+                </button>
+                {availableIngredients.length === 0 && recipe.length > 0 && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: "#6b7280",
+                      marginTop: 4,
+                    }}
+                  >
+                    Đã dùng hết các nguyên liệu trong kho.
+                  </div>
+                )}
+
+                <div
+                  className="form-actions"
+                  style={{ marginTop: 16, justifyContent: "flex-end" }}
+                >
+                  <button
+                    type="button"
+                    className="btn-secondary"
+                    onClick={() => setRecipe(recipeOriginal)}
+                    disabled={!dirty || saving}
+                  >
+                    Hoàn tác
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-primary"
+                    onClick={save}
+                    disabled={!dirty || saving}
+                  >
+                    {saving ? "Đang lưu..." : "Lưu công thức"}
+                  </button>
+                </div>
+              </>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function InventoryScreen() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"items" | "transactions">("items");
+  const [tab, setTab] = useState<"items" | "transactions" | "recipes">(
+    "items",
+  );
   const [modal, setModal] = useState<
     "create" | "edit" | "import" | "export" | null
   >(null);
   const [editItem, setEditItem] = useState<InventoryItem | undefined>();
   const [search, setSearch] = useState("");
+
+  const lastAvailabilityEvent = useMenuAvailabilityStore((s) => s.lastEvent);
 
   const load = async () => {
     setLoading(true);
@@ -303,6 +812,21 @@ export function InventoryScreen() {
   useEffect(() => {
     load();
   }, []);
+
+  // Auto-refresh when an ingredient delta arrives — covers manual reports and
+  // imports done elsewhere (KDS / kitchen). Menu-item-only events are skipped
+  // because they don't change ingredient quantities.
+  useEffect(() => {
+    if (!lastAvailabilityEvent) return;
+    const t = lastAvailabilityEvent.trigger;
+    if (
+      t === "INGREDIENT_ADJUSTED" ||
+      t === "INGREDIENT_MANUAL_REPORT" ||
+      t === "INGREDIENT_IMPORTED"
+    ) {
+      load();
+    }
+  }, [lastAvailabilityEvent]);
 
   const deleteItem = async (i: InventoryItem) => {
     if (!confirm(`Xoá nguyên liệu "${i.name}"?`)) return;
@@ -370,6 +894,12 @@ export function InventoryScreen() {
           onClick={() => setTab("transactions")}
         >
           Lịch sử giao dịch
+        </button>
+        <button
+          className={`inv-tab ${tab === "recipes" ? "active" : ""}`}
+          onClick={() => setTab("recipes")}
+        >
+          🍳 Nguyên liệu theo món
         </button>
       </div>
 
@@ -527,6 +1057,8 @@ export function InventoryScreen() {
           </table>
         </div>
       )}
+
+      {tab === "recipes" && <RecipeManager items={items} />}
 
       {(modal === "create" || modal === "edit") && (
         <Modal

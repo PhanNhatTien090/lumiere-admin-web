@@ -1,13 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from "react";
-import { Modal } from "antd";
 import { ClockCircleOutlined, FileTextOutlined, HistoryOutlined } from "@ant-design/icons";
 import { QRCodeSVG } from "qrcode.react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
-import { orderAPI, paymentAPI, publicMenuAPI, shiftAPI } from "@/api/endpoints";
+import { orderAPI, paymentAPI, paymentRequestAPI, publicMenuAPI, shiftAPI } from "@/api/endpoints";
 import { OrderItemResponse, OrderResponse, PaymentMethod, PaymentProvider, PaymentResponse, ShiftResponse, ShiftSummaryResponse } from "@/types";
 import { useAdminStore } from "@/store/adminStore";
+import { usePaymentRequestStore } from "@/store/paymentRequestStore";
 import { fmtDateTime as fmtTime } from "@/utils/format";
 import { InvoiceExport } from "./InvoiceExport";
+import { RefundModal } from "./RefundModal";
 
 function fmtVnd(n: number) {
   return new Intl.NumberFormat("vi-VN").format(n) + "đ";
@@ -38,9 +39,17 @@ function OrderItems({ items, menuItemNames }: { items: OrderItemResponse[]; menu
 }
 
 // ─── Payment Form ──────────────────────────────────────────────────────────────
+type PayMode = "CASH" | "VNPAY_QR" | "VIETQR" | "VNPAY_ATM";
+
+const PAY_MODE_REQUEST: Record<PayMode, { paymentMethod: PaymentMethod; provider: PaymentProvider }> = {
+  CASH:      { paymentMethod: "CASH",      provider: "CASH" },
+  VNPAY_QR:  { paymentMethod: "QR_CODE",   provider: "VNPAY" },
+  VIETQR:    { paymentMethod: "QR_CODE",   provider: "VIETQR" },
+  VNPAY_ATM: { paymentMethod: "VNPAY_ATM", provider: "VNPAY" },
+};
+
 function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId: number | null; onPaid: () => void }) {
-  const { staff } = useAdminStore();
-  const [method, setMethod] = useState<PaymentMethod>("CASH");
+  const [mode, setMode] = useState<PayMode>("CASH");
   const [loading, setLoading] = useState(false);
   const [payment, setPayment] = useState<PaymentResponse | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -69,25 +78,43 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
     }, 3000);
   };
 
-  useEffect(() => () => stopPolling(), []);
+  // Cancel any in-flight PENDING payment on the backend so we don't leave stale
+  // records when the cashier switches methods or closes the screen.
+  const cancelInFlightPayment = async (reason: string) => {
+    if (!payment?.paymentId) return;
+    try {
+      await paymentAPI.cancelPendingPayment(payment.paymentId, reason);
+    } catch {
+      // Already SUCCESS/FAILED on the server → ignore; backend rejects gracefully.
+    }
+  };
 
-  // Reset when method changes
+  useEffect(() => () => {
+    stopPolling();
+    // Best-effort cleanup if the modal/component unmounts mid-flow.
+    void cancelInFlightPayment("CASHIER_LEFT_SCREEN");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reset when mode changes — cancel server-side PENDING first.
   useEffect(() => {
     stopPolling();
+    void cancelInFlightPayment("METHOD_SWITCHED");
     setPayment(null);
     setErr(null);
     setPollStatus(null);
-  }, [method]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
 
   const createPayment = async () => {
     if (!shiftId) { setErr("Chưa mở ca. Vui lòng mở ca trước khi thanh toán."); return; }
     setLoading(true); setErr(null);
     try {
-      const provider: PaymentProvider = method === "CASH" ? "CASH" : "VNPAY";
+      const { paymentMethod, provider } = PAY_MODE_REQUEST[mode];
       const res = await paymentAPI.createPayment({
         orderId: order.id,
         shiftId,
-        paymentMethod: method,
+        paymentMethod,
         provider,
         locale: "vn",
         clientIp: null,
@@ -96,9 +123,9 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
       const p = res.data.data;
       setPayment(p);
 
-      if (method === "QR_CODE") {
+      if (mode === "VNPAY_QR") {
         pollPaymentStatus(order.id);
-      } else if (method === "VNPAY_ATM") {
+      } else if (mode === "VNPAY_ATM") {
         const url = p.payUrl || p.qrContent;
         if (url) {
           sessionStorage.setItem("vnpay_order_id", String(order.id));
@@ -107,6 +134,7 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
           setErr("Không nhận được link thanh toán từ server.");
         }
       }
+      // VIETQR & CASH: no polling, no redirect — cashier confirms manually below.
     } catch (e: any) {
       if (e.response?.status === 409) {
         try {
@@ -120,17 +148,15 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
     } finally { setLoading(false); }
   };
 
-  const refund = async () => {
+  const confirmManualPayment = async () => {
     if (!payment) return;
-    const reason = prompt("Nhập lý do hoàn tiền:");
-    if (!reason) return;
+    setLoading(true); setErr(null);
     try {
-      await paymentAPI.refundPayment(payment.paymentId, { amount: payment.amount, reason });
-      alert("Hoàn tiền thành công!");
+      await paymentAPI.confirmManualPayment(payment.paymentId);
       onPaid();
     } catch (e: any) {
-      alert(e.response?.data?.message || "Lỗi hoàn tiền");
-    }
+      setErr(e.response?.data?.message || "Lỗi xác nhận thanh toán");
+    } finally { setLoading(false); }
   };
 
   return (
@@ -139,20 +165,26 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
         <h4>Phương thức thanh toán</h4>
         <div className="pay-methods">
           <button
-            className={`pay-method-btn ${method === "CASH" ? "active" : ""}`}
-            onClick={() => setMethod("CASH")}
+            className={`pay-method-btn ${mode === "CASH" ? "active" : ""}`}
+            onClick={() => setMode("CASH")}
           >
             💵 Tiền mặt
           </button>
           <button
-            className={`pay-method-btn ${method === "QR_CODE" ? "active" : ""}`}
-            onClick={() => setMethod("QR_CODE")}
+            className={`pay-method-btn ${mode === "VNPAY_QR" ? "active" : ""}`}
+            onClick={() => setMode("VNPAY_QR")}
           >
             📱 VNPay QR
           </button>
           <button
-            className={`pay-method-btn ${method === "VNPAY_ATM" ? "active" : ""}`}
-            onClick={() => setMethod("VNPAY_ATM")}
+            className={`pay-method-btn ${mode === "VIETQR" ? "active" : ""}`}
+            onClick={() => setMode("VIETQR")}
+          >
+            🏦 Chuyển khoản VietQR
+          </button>
+          <button
+            className={`pay-method-btn ${mode === "VNPAY_ATM" ? "active" : ""}`}
+            onClick={() => setMode("VNPAY_ATM")}
           >
             🏧 VNPay ATM
           </button>
@@ -184,13 +216,27 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
         <button className="btn-pay" onClick={createPayment} disabled={loading}>
           {loading
             ? "Đang xử lý..."
-            : method === "VNPAY_ATM"
+            : mode === "VNPAY_ATM"
             ? "🏧 Chuyển sang VNPay"
             : "💳 Tạo thanh toán"}
         </button>
       ) : (
         <div className="payment-result">
-          {method === "QR_CODE" && (
+          <div
+            style={{
+              background: "#ecfdf5",
+              border: "1px solid #6ee7b7",
+              color: "#065f46",
+              padding: "10px 14px",
+              borderRadius: 8,
+              fontSize: 13,
+              margin: "0 0 12px",
+            }}
+          >
+            ✅ Đã sẵn sàng mã QR. Nhân viên phục vụ có thể mở app trên điện thoại
+            và hiển thị mã này tại bàn cho khách quét.
+          </div>
+          {mode === "VNPAY_QR" && (
             <div className="qr-display">
               <p className="qr-label">Quét mã QR để thanh toán VNPay</p>
               {payment.qrContent || payment.payUrl ? (
@@ -216,7 +262,42 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
             </div>
           )}
 
-          {method === "CASH" && (
+          {mode === "VIETQR" && (
+            <div className="qr-display">
+              <p className="qr-label">Khách quét mã bằng app banking để chuyển khoản</p>
+              {payment.qrContent ? (
+                <div style={{ display: "flex", justifyContent: "center", margin: "12px 0" }}>
+                  <QRCodeSVG
+                    value={payment.qrContent}
+                    size={220}
+                    level="M"
+                    includeMargin
+                  />
+                </div>
+              ) : (
+                <div className="qr-placeholder">Không có mã QR</div>
+              )}
+              <div className="cash-amount">
+                <span>Số tiền chuyển khoản</span>
+                <b>{fmtVnd(payment.amount)}</b>
+              </div>
+              <p className="qr-expire" style={{ textAlign: "center", color: "#888" }}>
+                Sau khi tiền về tài khoản, bấm nút bên dưới để xác nhận.
+              </p>
+              <button
+                className="btn-pay success"
+                onClick={confirmManualPayment}
+                disabled={loading}
+              >
+                {loading ? "Đang xác nhận..." : "✅ Đã nhận được tiền"}
+              </button>
+              {payment.qrExpiresAt && (
+                <p className="qr-expire">Hết hạn: {fmtTime(payment.qrExpiresAt)}</p>
+              )}
+            </div>
+          )}
+
+          {mode === "CASH" && (
             <div className="cash-confirm">
               {payment.taxMode !== "NO_TAX" && payment.taxAmount > 0 && (
                 <div className="cash-breakdown">
@@ -234,15 +315,16 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
                 <span>Số tiền thu</span>
                 <b>{fmtVnd(payment.amount)}</b>
               </div>
-              <button className="btn-pay success" onClick={onPaid}>
-                ✅ Xác nhận đã thu tiền
+              <button
+                className="btn-pay success"
+                onClick={confirmManualPayment}
+                disabled={loading}
+              >
+                {loading ? "Đang xác nhận..." : "✅ Xác nhận đã thu tiền"}
               </button>
             </div>
           )}
 
-          {staff?.role === "MANAGER" && (
-            <button className="btn-refund" onClick={refund}>🔄 Hoàn tiền</button>
-          )}
         </div>
       )}
     </div>
@@ -549,6 +631,8 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
   const [selected, setSelected] = useState<OrderResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [menuItemNames, setMenuItemNames] = useState<Map<number, string>>(new Map());
+  const paymentRequests = usePaymentRequestStore((s) => s.byOrderId);
+  const [ackBusyId, setAckBusyId] = useState<number | null>(null);
 
   useEffect(() => {
     publicMenuAPI.listItems()
@@ -600,29 +684,57 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
       </header>
 
       <div className="invoice-layout">
-        {/* Order list */}
+        {/* Order list — orders with an active customer payment-request bubble to the top. */}
         <div className="order-list-panel">
           <h4 className="panel-title">ĐƠN CHỜ THANH TOÁN</h4>
           {orders.length === 0 && !loading && (
             <div className="empty-state-small">Không có đơn nào chờ thanh toán</div>
           )}
-          {orders.map(order => (
-            <div
-              key={order.id}
-              className={`order-card ${selected?.id === order.id ? "selected" : ""}`}
-              onClick={() => setSelected(order)}
-            >
-              <div className="order-card-top">
-                <strong>Bàn {order.tableCode || order.tableId}</strong>
-                <span className="served-badge">SERVED</span>
-              </div>
-              <div className="order-card-bottom">
-                <span>{order.items?.length || 0} món</span>
-                <b className="order-total">{fmtVnd(order.totalAmount)}</b>
-              </div>
-              {order.servedAt && <small>{fmtTime(order.servedAt)}</small>}
-            </div>
-          ))}
+          {[...orders]
+            .sort((a, b) => {
+              const aReq = paymentRequests[a.id];
+              const bReq = paymentRequests[b.id];
+              if (!!aReq === !!bReq) return 0;
+              return aReq ? -1 : 1;
+            })
+            .map((order) => {
+              const req = paymentRequests[order.id];
+              return (
+                <div
+                  key={order.id}
+                  className={`order-card ${selected?.id === order.id ? "selected" : ""}`}
+                  style={req ? { borderLeft: "4px solid #f59e0b", background: "#fffbeb" } : undefined}
+                  onClick={() => setSelected(order)}
+                >
+                  <div className="order-card-top">
+                    <strong>Bàn {order.tableCode || order.tableId}</strong>
+                    <span className="served-badge">SERVED</span>
+                  </div>
+                  {req && (
+                    <div
+                      style={{
+                        background: req.status === "ACKNOWLEDGED" ? "#dbeafe" : "#fef3c7",
+                        color: req.status === "ACKNOWLEDGED" ? "#1d4ed8" : "#92400e",
+                        padding: "3px 8px",
+                        borderRadius: 6,
+                        fontSize: 11,
+                        fontWeight: 600,
+                        margin: "4px 0",
+                        display: "inline-block",
+                      }}
+                    >
+                      🛎️ {req.status === "ACKNOWLEDGED" ? "Đang xử lý" : "Khách yêu cầu"} ·
+                      {" "}{req.preferredMethod === "CASH" ? "Tiền mặt" : "Chuyển khoản"}
+                    </div>
+                  )}
+                  <div className="order-card-bottom">
+                    <span>{order.items?.length || 0} món</span>
+                    <b className="order-total">{fmtVnd(order.totalAmount)}</b>
+                  </div>
+                  {order.servedAt && <small>{fmtTime(order.servedAt)}</small>}
+                </div>
+              );
+            })}
         </div>
 
         {/* Detail panel */}
@@ -638,14 +750,78 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
                 <h3>Bàn {selected.tableCode || selected.tableId}</h3>
                 <small>Đơn #{selected.id}</small>
               </div>
+              {paymentRequests[selected.id] && (
+                <div
+                  style={{
+                    background: "#fffbeb",
+                    border: "1px solid #fde68a",
+                    borderRadius: 8,
+                    padding: 12,
+                    marginBottom: 12,
+                    display: "flex",
+                    justifyContent: "space-between",
+                    alignItems: "center",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: 13, fontWeight: 600, color: "#92400e" }}>
+                      🛎️ Khách yêu cầu thanh toán ·{" "}
+                      {paymentRequests[selected.id].preferredMethod === "CASH" ? "Tiền mặt" : "Chuyển khoản"}
+                    </div>
+                    <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>
+                      {paymentRequests[selected.id].status === "ACKNOWLEDGED"
+                        ? `Đã ghi nhận ${paymentRequests[selected.id].acknowledgedByName ?? ""}`
+                        : "Trạng thái: chờ cashier xác nhận"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    {paymentRequests[selected.id].status === "REQUESTED" && (
+                      <button
+                        className="btn-small"
+                        disabled={ackBusyId === paymentRequests[selected.id].id}
+                        onClick={async () => {
+                          const req = paymentRequests[selected.id];
+                          setAckBusyId(req.id);
+                          try {
+                            await paymentRequestAPI.acknowledge(req.id);
+                          } catch (e: any) {
+                            alert(e.response?.data?.message || "Lỗi xác nhận");
+                          } finally {
+                            setAckBusyId(null);
+                          }
+                        }}
+                      >
+                        ✅ Đã thấy
+                      </button>
+                    )}
+                    <button
+                      className="btn-small danger"
+                      disabled={ackBusyId === paymentRequests[selected.id].id}
+                      onClick={async () => {
+                        const req = paymentRequests[selected.id];
+                        const r = prompt("Lý do huỷ yêu cầu thanh toán này:", "");
+                        if (r === null) return;
+                        setAckBusyId(req.id);
+                        try {
+                          await paymentRequestAPI.cancel(req.id, r.trim() || "CANCELLED_BY_CASHIER");
+                        } catch (e: any) {
+                          alert(e.response?.data?.message || "Lỗi huỷ yêu cầu");
+                        } finally {
+                          setAckBusyId(null);
+                        }
+                      }}
+                    >
+                      ❌ Huỷ
+                    </button>
+                  </div>
+                </div>
+              )}
               <OrderItems items={selected.items || []} menuItemNames={menuItemNames} />
               <div className="detail-divider" />
-              <div className="header-actions" style={{ marginBottom: 12 }}>
-                <InvoiceExport
-                  orderId={selected.id}
-                  tableLabel={`Bàn ${selected.tableCode || selected.tableId}`}
-                />
-              </div>
+              {/* Invoice export hidden here: order is still SERVED (not PAID) so the
+                  printed receipt would have no payment method / time / cashier.
+                  Use the "Lịch sử" tab to reprint after payment is finalised. */}
               {!currentShift && (
                 <div className="alert-error" style={{ marginBottom: 8 }}>
                   ⚠️ Chưa mở ca — hãy mở ca trước khi thu tiền.
@@ -672,6 +848,7 @@ function HistoryScreen() {
   const [totalPages, setTotalPages] = useState(0);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [refundTarget, setRefundTarget] = useState<OrderResponse | null>(null);
 
   const load = useCallback(async (nextPage: number, nextSize: number) => {
     setLoading(true); setError(null);
@@ -745,15 +922,11 @@ function HistoryScreen() {
                 </td>
                 {staff?.role === "MANAGER" && (
                   <td>
-                    <button className="btn-small danger" onClick={() => {
-                      Modal.confirm({
-                        title: 'Xác nhận hoàn tiền',
-                        content: 'Để hoàn tiền, vui lòng vào tab "Hóa đơn chờ", chọn đơn hàng và dùng chức năng hoàn tiền trong form thanh toán.',
-                        okText: 'Đã hiểu',
-                        cancelText: 'Đóng',
-                      });
-                    }}>
-                      Hoàn tiền
+                    <button
+                      className="btn-small danger"
+                      onClick={() => setRefundTarget(order)}
+                    >
+                      🔄 Hoàn tiền
                     </button>
                   </td>
                 )}
@@ -812,6 +985,14 @@ function HistoryScreen() {
             </button>
           </div>
         </div>
+      )}
+
+      {refundTarget && (
+        <RefundModal
+          order={refundTarget}
+          onClose={() => setRefundTarget(null)}
+          onChanged={() => void load(page, size)}
+        />
       )}
     </div>
   );
@@ -902,15 +1083,23 @@ export function CashierPortal() {
     return true;
   }, [currentShift]);
 
+  const paymentRequestUnread = usePaymentRequestStore((s) => s.unreadCount);
+  const markPaymentRequestsRead = usePaymentRequestStore((s) => s.markAllRead);
+
   const navItems = [
     {
       id: "shift",
       label: currentShift ? `Ca #${currentShift.id} 🟢` : "Ca làm việc",
       icon: <ClockCircleOutlined />,
     },
-    { id: "invoice", label: "Hóa đơn chờ", icon: <FileTextOutlined /> },
+    { id: "invoice", label: "Hóa đơn chờ", icon: <FileTextOutlined />, badge: paymentRequestUnread },
     { id: "history", label: "Lịch sử",     icon: <HistoryOutlined /> },
   ];
+
+  const handleTabChange = (next: string) => {
+    setTab(next);
+    if (next === "invoice") markPaymentRequestsRead();
+  };
 
   return (
     <>
@@ -926,7 +1115,7 @@ export function CashierPortal() {
         subtitle="CASHIER"
         navItems={navItems}
         activeTab={tab}
-        onTabChange={setTab}
+        onTabChange={handleTabChange}
         onBeforeLogout={handleBeforeLogout}
       >
         {tab === "shift" && (

@@ -6,6 +6,8 @@ export interface NavItem {
   id: string;
   label: string;
   icon?: ReactNode;
+  /** Optional red dot count rendered next to the label (e.g. low-stock alerts). 0 = hidden. */
+  badge?: number;
 }
 
 interface PortalLayoutProps {
@@ -67,6 +69,23 @@ export function PortalLayout({ subtitle, navItems, activeTab, onTabChange, child
                   <span className="nav-icon" aria-hidden="true">{item.icon}</span>
                 )}
                 {item.label}
+                {item.badge != null && item.badge > 0 && (
+                  <span
+                    aria-label={`${item.badge} cảnh báo`}
+                    style={{
+                      marginLeft: 8,
+                      background: "#ef4444",
+                      color: "#fff",
+                      borderRadius: 10,
+                      padding: "1px 7px",
+                      fontSize: 11,
+                      fontWeight: 700,
+                      lineHeight: 1.4,
+                    }}
+                  >
+                    {item.badge > 99 ? "99+" : item.badge}
+                  </span>
+                )}
               </button>
             ))}
           </nav>
