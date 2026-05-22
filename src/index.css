@@ -129,8 +129,14 @@ input[type=file]{padding:8px 12px;}
    especially on a cream portal background. Force readable defaults. */
 .portal-content input,
 .portal-content select,
-.portal-content textarea,
-.portal-content option{color:#1f2937;}
+.portal-content textarea{
+  background:#fff;color:#1f2937;
+  border:1px solid #d1d5db;
+}
+.portal-content input:focus,
+.portal-content select:focus,
+.portal-content textarea:focus{border-color:#d4ad34;}
+.portal-content option{background:#fff;color:#1f2937;}
 .portal-content input::placeholder,
 .portal-content textarea::placeholder{color:#9ca3af;}
 
