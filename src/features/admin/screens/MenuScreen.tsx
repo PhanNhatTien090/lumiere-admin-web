@@ -256,7 +256,7 @@ function PickComboConfig({ itemId, items, initial, onSave, onSkip }: {
           <div className="form-group">
             <label>Món được phép chọn ({slot.allowedItemIds.length} đã chọn)</label>
             <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 160, overflowY: "auto", border: "1px solid #e5e7eb", borderRadius: 6, padding: 8 }}>
-              {items.map(it => {
+              {items.filter(it => it.itemType === "SINGLE").map(it => {
                 const selected = slot.allowedItemIds.includes(it.id);
                 return (
                   <button
