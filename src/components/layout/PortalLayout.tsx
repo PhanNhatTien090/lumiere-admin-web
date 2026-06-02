@@ -1,6 +1,7 @@
-import { ReactNode, useCallback } from "react";
+import { ReactNode, useCallback, useState } from "react";
 import { authAPI } from "@/api/endpoints";
 import { useAdminStore } from "@/store/adminStore";
+import { ChangePasswordModal } from "@/features/auth/ChangePasswordModal";
 
 export interface NavItem {
   id: string;
@@ -36,6 +37,7 @@ function LogoutIcon() {
 
 export function PortalLayout({ subtitle, navItems, activeTab, onTabChange, children, onBeforeLogout }: PortalLayoutProps) {
   const { staff, logout } = useAdminStore();
+  const [showChangePw, setShowChangePw] = useState(false);
 
   const handleLogout = useCallback(() => {
     if (onBeforeLogout && !onBeforeLogout()) return;
@@ -90,15 +92,22 @@ export function PortalLayout({ subtitle, navItems, activeTab, onTabChange, child
             ))}
           </nav>
         </div>
-        <button className="logout-btn" onClick={handleLogout}>
-          <LogoutIcon />
-          Đăng xuất
-        </button>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <button className="logout-btn" onClick={() => setShowChangePw(true)}>
+            🔑 Đổi mật khẩu
+          </button>
+          <button className="logout-btn" onClick={handleLogout}>
+            <LogoutIcon />
+            Đăng xuất
+          </button>
+        </div>
       </aside>
 
       <article className="portal-content">
         {children}
       </article>
+
+      {showChangePw && <ChangePasswordModal onClose={() => setShowChangePw(false)} />}
     </section>
   );
 }

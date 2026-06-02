@@ -6,6 +6,7 @@ import {
   MenuItemResponse,
   ManagerMenuCategoryListItemResponse,
   RecipeItem,
+  ExpiringLot,
 } from "@/types";
 import { fmtDateTime } from "@/utils/format";
 import { useMenuAvailabilityStore } from "@/store/menuAvailabilityStore";
@@ -53,6 +54,11 @@ function ItemForm({
   const [unit, setUnit] = useState(initial?.unit ?? "G");
   const [minStock, setMinStock] = useState(initial?.minStock ?? 0);
   const [currentStock, setCurrentStock] = useState(initial?.currentStock ?? 0);
+  // Hạn dùng cho lô tồn kho khởi tạo (chỉ dùng khi tạo mới + currentStock > 0).
+  // Mặc định 30 ngày tới để qua ràng buộc @Future của backend.
+  const [initExpiry, setInitExpiry] = useState(
+    new Date(Date.now() + 30 * 86400000).toISOString().slice(0, 10),
+  );
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -82,6 +88,7 @@ function ItemForm({
           await inventoryAPI.importStock({
             itemId: created.data.data.id,
             quantity: currentStock,
+            expiryDate: initExpiry,
             note: "Khởi tạo tồn kho ban đầu",
           });
         }
@@ -137,6 +144,17 @@ function ItemForm({
           />
         </div>
       </div>
+      {!initial && currentStock > 0 && (
+        <div className="form-group">
+          <label>Hạn sử dụng lô khởi tạo *</label>
+          <input
+            type="date"
+            value={initExpiry}
+            min={new Date(Date.now() + 86400000).toISOString().slice(0, 10)}
+            onChange={(e) => setInitExpiry(e.target.value)}
+          />
+        </div>
+      )}
       <div className="form-actions">
         <button className="btn-secondary" onClick={onClose}>
           Huỷ
@@ -163,8 +181,16 @@ function TransactionForm({
   const [itemId, setItemId] = useState(items[0]?.id ?? 0);
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState("");
+  const [expiryDate, setExpiryDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Ngày tối thiểu cho hạn dùng = ngày mai (backend yêu cầu @Future).
+  const minExpiry = useMemo(() => {
+    const d = new Date();
+    d.setDate(d.getDate() + 1);
+    return d.toISOString().slice(0, 10);
+  }, []);
 
   const submit = async () => {
     if (!itemId) {
@@ -175,12 +201,18 @@ function TransactionForm({
       setErr("Số lượng phải lớn hơn 0");
       return;
     }
+    if (type === "import") {
+      if (!expiryDate) { setErr("Chọn hạn sử dụng"); return; }
+      if (expiryDate < minExpiry) { setErr("Hạn sử dụng phải sau ngày hôm nay"); return; }
+    }
     setLoading(true);
     setErr(null);
     try {
-      const data = { itemId, quantity, note: note || undefined };
-      if (type === "import") await inventoryAPI.importStock(data);
-      else await inventoryAPI.exportStock(data);
+      if (type === "import") {
+        await inventoryAPI.importStock({ itemId, quantity, expiryDate, note: note || undefined });
+      } else {
+        await inventoryAPI.exportStock({ itemId, quantity, note: note || undefined });
+      }
       onSave();
     } catch (e: any) {
       setErr(e.response?.data?.message || "Lỗi giao dịch kho");
@@ -221,6 +253,17 @@ function TransactionForm({
           />
         </div>
       </div>
+      {type === "import" && (
+        <div className="form-group">
+          <label>Hạn sử dụng *</label>
+          <input
+            type="date"
+            value={expiryDate}
+            min={minExpiry}
+            onChange={(e) => setExpiryDate(e.target.value)}
+          />
+        </div>
+      )}
       <div className="form-actions">
         <button className="btn-secondary" onClick={onClose}>
           Huỷ
@@ -735,12 +778,102 @@ function RecipeManager({ items }: { items: InventoryItem[] }) {
   );
 }
 
+/** Panel "Cận hạn": liệt kê lô sắp/đã hết hạn (FEFO) + huỷ lô. */
+function ExpiringPanel() {
+  const [days, setDays] = useState(3);
+  const [lots, setLots] = useState<ExpiringLot[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const load = async (d = days) => {
+    setLoading(true); setErr(null);
+    try {
+      const res = await inventoryAPI.getExpiring(d);
+      setLots(res.data.data || []);
+    } catch (e: any) {
+      setErr(e.response?.data?.message || "Lỗi tải danh sách cận hạn");
+    } finally { setLoading(false); }
+  };
+
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+
+  const wasteLot = async (lot: ExpiringLot) => {
+    const reason = window.prompt(
+      `Lý do huỷ lô #${lot.lotId} — ${lot.ingredientName} (còn ${lot.remainingQty}):`,
+      lot.expired ? "Hết hạn sử dụng" : "",
+    );
+    if (reason == null) return;
+    if (!reason.trim()) { alert("Phải nhập lý do"); return; }
+    try {
+      await inventoryAPI.wasteLot(lot.lotId, reason.trim());
+      load();
+    } catch (e: any) {
+      alert(e.response?.data?.message || "Lỗi huỷ lô");
+    }
+  };
+
+  return (
+    <div>
+      <div className="filter-bar" style={{ marginBottom: 12 }}>
+        <label style={{ marginRight: 8 }}>Trong vòng (ngày):</label>
+        <select value={days} onChange={(e) => { const d = +e.target.value; setDays(d); load(d); }}>
+          {[1, 3, 7, 14, 30].map((d) => <option key={d} value={d}>{d}</option>)}
+        </select>
+        <button className="btn-secondary" onClick={() => load()} style={{ marginLeft: 8 }}>🔄 Tải lại</button>
+      </div>
+      {err && <div className="alert-error">{err}</div>}
+      {loading && <div className="loading-state">Đang tải...</div>}
+      <div className="staff-table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Nguyên liệu</th>
+              <th>Lô</th>
+              <th>Còn lại</th>
+              <th>Hạn sử dụng</th>
+              <th>Còn (ngày)</th>
+              <th>Trạng thái</th>
+              <th>Thao tác</th>
+            </tr>
+          </thead>
+          <tbody>
+            {lots.map((lot, idx) => (
+              <tr key={lot.lotId} className={lot.expired ? "row-warning" : ""}>
+                <td>{idx + 1}</td>
+                <td><strong>{lot.ingredientName}</strong></td>
+                <td><code>#{lot.lotId}</code></td>
+                <td>{lot.remainingQty}</td>
+                <td>{lot.expiryDate}</td>
+                <td>{lot.daysUntilExpiry}</td>
+                <td>
+                  <span className={`status-badge ${lot.expired ? "inactive" : "active"}`}>
+                    {lot.expired ? "❌ Hết hạn" : lot.daysUntilExpiry <= 1 ? "⚠️ Sắp hết hạn" : "🟡 Cận hạn"}
+                  </span>
+                </td>
+                <td>
+                  <button className="btn-small danger" onClick={() => wasteLot(lot)}>🗑️ Huỷ lô</button>
+                </td>
+              </tr>
+            ))}
+            {lots.length === 0 && !loading && (
+              <tr>
+                <td colSpan={8} className="empty-cell">Không có lô nào cận hạn trong {days} ngày</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function InventoryScreen() {
   const [items, setItems] = useState<InventoryItem[]>([]);
   const [transactions, setTransactions] = useState<InventoryTransaction[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [tab, setTab] = useState<"items" | "transactions" | "recipes">(
+  const [tab, setTab] = useState<"items" | "transactions" | "expiring" | "recipes">(
     "items",
   );
   const [modal, setModal] = useState<
@@ -894,6 +1027,12 @@ export function InventoryScreen() {
           onClick={() => setTab("transactions")}
         >
           Lịch sử giao dịch
+        </button>
+        <button
+          className={`inv-tab ${tab === "expiring" ? "active" : ""}`}
+          onClick={() => setTab("expiring")}
+        >
+          ⏰ Cận hạn
         </button>
         <button
           className={`inv-tab ${tab === "recipes" ? "active" : ""}`}
@@ -1057,6 +1196,8 @@ export function InventoryScreen() {
           </table>
         </div>
       )}
+
+      {tab === "expiring" && <ExpiringPanel />}
 
       {tab === "recipes" && <RecipeManager items={items} />}
 

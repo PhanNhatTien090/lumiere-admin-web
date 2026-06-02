@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { staffAPI } from "@/api/endpoints";
-import { Staff, StaffRole, CreateStaffRequest, UpdateStaffRequest } from "@/types";
+import { Staff, StaffRole, StaffStatus, CreateStaffRequest, UpdateStaffRequest } from "@/types";
+import { validatePasswordPolicy } from "@/utils/password";
 
 const ROLE_LABELS: Record<StaffRole, string> = {
   MANAGER: "Quản lý",
@@ -39,17 +40,28 @@ function StaffForm({ initial, onSave, onClose }: {
   const [staffName, setStaffName] = useState(initial?.name || initial?.fullName || "");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<StaffRole>(initial?.role ?? "WAITER");
+  const [status, setStatus] = useState<StaffStatus>(
+    initial?.status === "INACTIVE" ? "INACTIVE" : "ACTIVE",
+  );
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const submit = async () => {
     if (!staffName.trim()) { setErr("Tên không được trống"); return; }
-    if (!initial && !username.trim()) { setErr("Tên đăng nhập không được trống"); return; }
-    if (!initial && !password.trim()) { setErr("Mật khẩu không được trống"); return; }
+    if (!username.trim()) { setErr("Tên đăng nhập không được trống"); return; }
+    if (!initial) {
+      const pwErr = validatePasswordPolicy(password);
+      if (pwErr) { setErr(pwErr); return; }
+    }
     setLoading(true); setErr(null);
     try {
       if (initial) {
-        const data: UpdateStaffRequest = { name: staffName.trim(), role };
+        const data: UpdateStaffRequest = {
+          name: staffName.trim(),
+          username: username.trim(),
+          role,
+          status,
+        };
         await staffAPI.update(initial.id, data);
       } else {
         const data: CreateStaffRequest = { username: username.trim(), password, name: staffName.trim(), role };
@@ -64,12 +76,16 @@ function StaffForm({ initial, onSave, onClose }: {
   return (
     <>
       {err && <div className="form-err">{err}</div>}
-      {!initial && (
+      {initial?.employeeCode && (
         <div className="form-group">
-          <label>Tên đăng nhập *</label>
-          <input value={username} onChange={e => setUsername(e.target.value)} placeholder="VD: cashier03" />
+          <label>Mã nhân viên</label>
+          <input value={initial.employeeCode} readOnly disabled />
         </div>
       )}
+      <div className="form-group">
+        <label>Tên đăng nhập *</label>
+        <input value={username} onChange={e => setUsername(e.target.value)} placeholder="VD: cashier03" />
+      </div>
       <div className="form-group">
         <label>Họ và tên *</label>
         <input value={staffName} onChange={e => setStaffName(e.target.value)} placeholder="VD: Nguyễn Văn A" />
@@ -77,7 +93,7 @@ function StaffForm({ initial, onSave, onClose }: {
       {!initial && (
         <div className="form-group">
           <label>Mật khẩu *</label>
-          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="Mật khẩu..." />
+          <input type="password" value={password} onChange={e => setPassword(e.target.value)} placeholder="≥8 ký tự, 1 chữ HOA, 1 số" />
         </div>
       )}
       <div className="form-group">
@@ -88,6 +104,15 @@ function StaffForm({ initial, onSave, onClose }: {
           ))}
         </select>
       </div>
+      {initial && (
+        <div className="form-group">
+          <label>Trạng thái</label>
+          <select value={status} onChange={e => setStatus(e.target.value as StaffStatus)}>
+            <option value="ACTIVE">Hoạt động</option>
+            <option value="INACTIVE">Ngừng hoạt động</option>
+          </select>
+        </div>
+      )}
       <div className="form-actions">
         <button className="btn-secondary" onClick={onClose}>Huỷ</button>
         <button className="btn-primary" onClick={() => void submit()} disabled={loading}>
@@ -98,11 +123,53 @@ function StaffForm({ initial, onSave, onClose }: {
   );
 }
 
+/** Modal đặt lại mật khẩu cho 1 nhân viên (MANAGER). */
+function ResetPasswordForm({ staff, onDone, onClose }: {
+  staff: Staff;
+  onDone: () => void;
+  onClose: () => void;
+}) {
+  const [newPassword, setNewPassword] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  const submit = async () => {
+    const pwErr = validatePasswordPolicy(newPassword);
+    if (pwErr) { setErr(pwErr); return; }
+    setLoading(true); setErr(null);
+    try {
+      await staffAPI.resetPassword(staff.id, newPassword);
+      onDone();
+    } catch (e: any) {
+      setErr(e.response?.data?.message || "Lỗi đặt lại mật khẩu");
+    } finally { setLoading(false); }
+  };
+
+  return (
+    <>
+      {err && <div className="form-err">{err}</div>}
+      <p style={{ margin: "0 0 12px", color: "#9ca3af" }}>
+        Đặt mật khẩu mới cho <b>{staff.name || staff.fullName || staff.username}</b> ({staff.username})
+      </p>
+      <div className="form-group">
+        <label>Mật khẩu mới *</label>
+        <input type="password" value={newPassword} onChange={e => setNewPassword(e.target.value)} placeholder="≥8 ký tự, 1 chữ HOA, 1 số" />
+      </div>
+      <div className="form-actions">
+        <button className="btn-secondary" onClick={onClose}>Huỷ</button>
+        <button className="btn-primary" onClick={() => void submit()} disabled={loading}>
+          {loading ? "Đang lưu..." : "Đặt lại mật khẩu"}
+        </button>
+      </div>
+    </>
+  );
+}
+
 export function StaffScreen() {
   const [staffList, setStaffList] = useState<Staff[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [modal, setModal] = useState<"create" | "edit" | null>(null);
+  const [modal, setModal] = useState<"create" | "edit" | "reset" | null>(null);
   const [editStaff, setEditStaff] = useState<Staff | undefined>();
   const [filterRole, setFilterRole] = useState<StaffRole | "ALL">("ALL");
   const [search, setSearch] = useState("");
@@ -194,6 +261,7 @@ export function StaffScreen() {
           <thead>
             <tr>
               <th>#</th>
+              <th>Mã NV</th>
               <th>Họ và tên</th>
               <th>Username</th>
               <th>Vai trò</th>
@@ -205,6 +273,7 @@ export function StaffScreen() {
             {filtered.map((s, idx) => (
               <tr key={s.id}>
                 <td>{idx + 1}</td>
+                <td><code>{s.employeeCode || "—"}</code></td>
                 <td><strong>{s.name || s.fullName || s.username}</strong></td>
                 <td><code>{s.username}</code></td>
                 <td>
@@ -220,6 +289,7 @@ export function StaffScreen() {
                 <td>
                   <div className="row-actions">
                     <button className="btn-small" onClick={() => { setEditStaff(s); setModal("edit"); }}>✏️ Sửa</button>
+                    <button className="btn-small" onClick={() => { setEditStaff(s); setModal("reset"); }}>🔑 Đặt lại MK</button>
                     <button className="btn-small danger" onClick={() => void deleteStaff(s)}>🗑️ Xoá</button>
                   </div>
                 </td>
@@ -227,18 +297,26 @@ export function StaffScreen() {
             ))}
             {filtered.length === 0 && !loading && (
               <tr>
-                <td colSpan={6} className="empty-cell">Không tìm thấy nhân viên</td>
+                <td colSpan={7} className="empty-cell">Không tìm thấy nhân viên</td>
               </tr>
             )}
           </tbody>
         </table>
       </div>
 
-      {modal && (
+      {modal === "reset" && editStaff ? (
+        <Modal title="Đặt lại mật khẩu" onClose={() => setModal(null)}>
+          <ResetPasswordForm
+            staff={editStaff}
+            onDone={() => { setModal(null); alert("Đã đặt lại mật khẩu"); }}
+            onClose={() => setModal(null)}
+          />
+        </Modal>
+      ) : modal ? (
         <Modal title={modal === "create" ? "Thêm nhân viên" : "Sửa nhân viên"} onClose={() => setModal(null)}>
           <StaffForm initial={editStaff} onSave={() => { setModal(null); load(); }} onClose={() => setModal(null)} />
         </Modal>
-      )}
+      ) : null}
     </div>
   );
 }

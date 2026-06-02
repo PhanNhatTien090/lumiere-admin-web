@@ -1,7 +1,15 @@
 import { useEffect, useState } from "react";
 import { analyticsAPI } from "@/api/endpoints";
-import { AnalyticsSummary } from "@/types";
+import { AnalyticsSummary, KitchenSlaStats } from "@/types";
 import { fmtVnd, fmtVndCompact, fmtCount as fmt, fmtDate, fmtDateTime } from "@/utils/format";
+
+/** Định dạng giây → "Xm Ys" cho dễ đọc. */
+function fmtSeconds(sec: number): string {
+  if (!sec || sec < 0) return "0s";
+  const m = Math.floor(sec / 60);
+  const s = Math.round(sec % 60);
+  return m > 0 ? `${m}m ${s}s` : `${s}s`;
+}
 
 export function AnalyticsScreen() {
   const today = new Date().toISOString().slice(0, 10);
@@ -10,12 +18,18 @@ export function AnalyticsScreen() {
   const [from, setFrom] = useState(oneMonthAgo);
   const [to, setTo] = useState(today);
   const [data, setData] = useState<AnalyticsSummary | null>(null);
+  const [sla, setSla] = useState<KitchenSlaStats | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const load = async () => {
     setLoading(true);
     setError(null);
+    // SLA bếp tải song song, lỗi không chặn báo cáo chính.
+    analyticsAPI
+      .getKitchenSla(from, to)
+      .then((res) => setSla(res.data.success ? res.data.data : null))
+      .catch(() => setSla(null));
     try {
       const res = await analyticsAPI.getSummary(from, to);
       if (res.data.success) setData(res.data.data);
@@ -173,6 +187,56 @@ export function AnalyticsScreen() {
               </table>
             </div>
           </div>
+
+          {sla && (
+            <div style={{ marginTop: 24 }}>
+              <h3 style={{ margin: "0 0 12px" }}>🍳 Hiệu suất bếp / SLA</h3>
+              <div className="metrics-grid">
+                <div className="metric-card accent">
+                  <div className="metric-icon">⏱️</div>
+                  <div>
+                    <p>Tỷ lệ trễ SLA</p>
+                    <b className="metric-value">{(sla.breachRate * 100).toFixed(1)}%</b>
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-icon">📋</div>
+                  <div>
+                    <p>Tổng món chế biến</p>
+                    <b className="metric-value">{fmt(sla.totalTasks)}</b>
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-icon">🚨</div>
+                  <div>
+                    <p>Số món trễ</p>
+                    <b className="metric-value">{fmt(sla.breachedTasks)}</b>
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-icon">⌛</div>
+                  <div>
+                    <p>Thời gian chờ TB</p>
+                    <b className="metric-value">{fmtSeconds(sla.avgWaitSeconds)}</b>
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-icon">📈</div>
+                  <div>
+                    <p>p95 thời gian chờ</p>
+                    <b className="metric-value">{fmtSeconds(sla.p95WaitSeconds)}</b>
+                  </div>
+                </div>
+                <div className="metric-card">
+                  <div className="metric-icon">🔺</div>
+                  <div>
+                    <p>Chờ lâu nhất</p>
+                    <b className="metric-value">{fmtSeconds(sla.maxWaitSeconds)}</b>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
         </>
       )}
 

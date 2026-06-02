@@ -11,8 +11,11 @@ export interface ApiResponse<T> {
 // ─── Auth / Staff ──────────────────────────────────────────────────────────────
 export type StaffRole = "MANAGER" | "CASHIER" | "KITCHEN" | "WAITER";
 
+export type StaffStatus = "ACTIVE" | "INACTIVE";
+
 export interface Staff {
   id: number;
+  employeeCode?: string; // backend: employee_code (mã nhân viên tự sinh)
   username: string;
   name?: string;       // backend field: name
   fullName?: string;   // alias for compatibility
@@ -42,9 +45,37 @@ export interface CreateStaffRequest {
 }
 
 export interface UpdateStaffRequest {
-  name?: string;       // backend field: name
-  role?: StaffRole;
-  status?: string;
+  name: string;        // backend field: name (NotBlank)
+  username: string;    // backend: username (NotBlank)
+  role: StaffRole;     // backend: role (NotNull)
+  status?: StaffStatus;
+}
+
+export interface ChangePasswordRequest {
+  currentPassword: string;
+  newPassword: string;
+}
+
+// ─── Kitchen SLA (analytics) ─────────────────────────────────────────────────────
+export interface KitchenSlaStats {
+  totalTasks: number;
+  breachedTasks: number;
+  breachRate: number;      // 0..1
+  avgWaitSeconds: number;
+  p95WaitSeconds: number;
+  maxWaitSeconds: number;
+}
+
+// ─── Inventory lots (FEFO) ───────────────────────────────────────────────────────
+export interface ExpiringLot {
+  lotId: number;
+  ingredientId: number;
+  ingredientName: string;
+  remainingQty: number;
+  expiryDate: string;      // yyyy-MM-dd
+  importedAt: string;
+  daysUntilExpiry: number;
+  expired: boolean;
 }
 
 // ─── Table ─────────────────────────────────────────────────────────────────────

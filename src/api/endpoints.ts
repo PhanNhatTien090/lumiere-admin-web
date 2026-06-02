@@ -15,6 +15,9 @@ import {
   Staff,
   CreateStaffRequest,
   UpdateStaffRequest,
+  ChangePasswordRequest,
+  KitchenSlaStats,
+  ExpiringLot,
   CreatePaymentRequest,
   PaymentResponse,
   PaymentRequestResponse,
@@ -78,6 +81,9 @@ export const authAPI = {
   login: (credentials: LoginRequest) =>
     axiosInstance.post<ApiResponse<AuthResponse>>("/auth/login", credentials),
   logout: () => axiosInstance.post<ApiResponse<unknown>>("/auth/logout"),
+  /** POST /auth/change-password — nhân viên tự đổi mật khẩu (đã đăng nhập). */
+  changePassword: (data: ChangePasswordRequest) =>
+    axiosInstance.post<ApiResponse<void>>("/auth/change-password", data),
 };
 
 // ─── Orders ─────────────────────────────────────────────────────────────────────
@@ -247,6 +253,11 @@ export const staffAPI = {
     axiosInstance.put<ApiResponse<Staff>>(`/staff/${id}`, data),
   remove: (id: number) =>
     axiosInstance.delete<ApiResponse<void>>(`/staff/${id}`),
+  /** POST /staff/{id}/reset-password — MANAGER đặt lại mật khẩu cho NV. */
+  resetPassword: (id: number, newPassword: string) =>
+    axiosInstance.post<ApiResponse<void>>(`/staff/${id}/reset-password`, {
+      newPassword,
+    }),
 };
 
 // ─── Inventory (MANAGER) ────────────────────────────────────────────────────────
@@ -387,14 +398,32 @@ export const inventoryAPI = {
       },
     };
   },
-  importStock: (data: { itemId: number; quantity: number; note?: string }) =>
+  importStock: (data: {
+    itemId: number;
+    quantity: number;
+    expiryDate: string; // yyyy-MM-dd, bắt buộc (ngày tương lai)
+    note?: string;
+  }) =>
     axiosInstance.post<ApiResponse<IngredientResponseDto>>(
       "/manager/inventory/stock/import",
       {
         ingredientId: data.itemId,
         quantity: data.quantity,
+        expiryDate: data.expiryDate,
         note: data.note,
       },
+    ),
+  /** GET /manager/inventory/expiring?days= — lô sắp/đã hết hạn (FEFO). */
+  getExpiring: (days = 3) =>
+    axiosInstance.get<ApiResponse<ExpiringLot[]>>(
+      "/manager/inventory/expiring",
+      { params: { days } },
+    ),
+  /** POST /manager/inventory/lots/{id}/waste — đánh dấu lô huỷ/hao hụt. */
+  wasteLot: (lotId: number, reason: string) =>
+    axiosInstance.post<ApiResponse<void>>(
+      `/manager/inventory/lots/${lotId}/waste`,
+      { reason },
     ),
   exportStock: async (data: {
     itemId: number;
@@ -522,6 +551,11 @@ export const analyticsAPI = {
       "/analytics/revenue",
       { params },
     ),
+  /** GET /analytics/kitchen-sla — thống kê SLA bếp (tỷ lệ trễ, p95...). */
+  getKitchenSla: (fromDate?: string, toDate?: string) =>
+    axiosInstance.get<ApiResponse<KitchenSlaStats>>("/analytics/kitchen-sla", {
+      params: { fromDate, toDate },
+    }),
 };
 
 // ─── Support — list/assign/status: WAITER, MANAGER; create/table/get: permitAll ──
