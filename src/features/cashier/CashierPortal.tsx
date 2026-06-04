@@ -3,7 +3,7 @@ import { ClockCircleOutlined, FileTextOutlined, HistoryOutlined } from "@ant-des
 import { QRCodeSVG } from "qrcode.react";
 import { PortalLayout } from "@/components/layout/PortalLayout";
 import { orderAPI, paymentAPI, paymentRequestAPI, publicMenuAPI, shiftAPI } from "@/api/endpoints";
-import { OrderItemResponse, OrderResponse, PaymentMethod, PaymentProvider, PaymentResponse, ShiftResponse, ShiftSummaryResponse } from "@/types";
+import { GroupBillResponse, OrderItemResponse, OrderResponse, PaymentMethod, PaymentProvider, PaymentResponse, ShiftResponse, ShiftSummaryResponse } from "@/types";
 import { useAdminStore } from "@/store/adminStore";
 import { usePaymentRequestStore } from "@/store/paymentRequestStore";
 import { fmtDateTime as fmtTime } from "@/utils/format";
@@ -325,6 +325,190 @@ function PaymentForm({ order, shiftId, onPaid }: { order: OrderResponse; shiftId
             </div>
           )}
 
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Group Payment Form (gộp bàn) ────────────────────────────────────────────────
+function GroupPaymentForm({ groupId, shiftId, onPaid }: { groupId: number; shiftId: number | null; onPaid: () => void }) {
+  const [bill, setBill] = useState<GroupBillResponse | null>(null);
+  const [billErr, setBillErr] = useState<string | null>(null);
+  const [mode, setMode] = useState<PayMode>("CASH");
+  const [loading, setLoading] = useState(false);
+  const [payment, setPayment] = useState<PaymentResponse | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [pollStatus, setPollStatus] = useState<string | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current) { clearInterval(pollRef.current); pollRef.current = null; }
+  };
+
+  const loadBill = useCallback(async () => {
+    try {
+      const res = await paymentAPI.getGroupBill(groupId);
+      setBill(res.data.data);
+      setBillErr(null);
+    } catch (e: any) {
+      setBillErr(e.response?.data?.message || "Không tải được hoá đơn nhóm");
+    }
+  }, [groupId]);
+
+  useEffect(() => { void loadBill(); }, [loadBill]);
+
+  const cancelInFlightPayment = async (reason: string) => {
+    if (!payment?.paymentId) return;
+    try {
+      await paymentAPI.cancelPendingPayment(payment.paymentId, reason);
+    } catch { /* already terminal on server */ }
+  };
+
+  useEffect(() => () => {
+    stopPolling();
+    void cancelInFlightPayment("CASHIER_LEFT_SCREEN");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    stopPolling();
+    void cancelInFlightPayment("METHOD_SWITCHED");
+    setPayment(null);
+    setErr(null);
+    setPollStatus(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mode]);
+
+  const pollPaymentStatus = (orderId: number) => {
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await paymentAPI.getStatus(orderId);
+        const s = res.data.data.status;
+        setPollStatus(s);
+        if (s === "PAID" || s === "SUCCESS") {
+          stopPolling();
+          onPaid();
+        } else if (s === "FAILED") {
+          stopPolling();
+          setErr("Thanh toán thất bại. Vui lòng thử lại.");
+          setPayment(null);
+        }
+      } catch { /* ignore */ }
+    }, 3000);
+  };
+
+  const createPayment = async () => {
+    if (!shiftId) { setErr("Chưa mở ca. Vui lòng mở ca trước khi thanh toán."); return; }
+    if (!bill?.payable) { setErr(bill?.reason || "Nhóm chưa thể thanh toán."); return; }
+    setLoading(true); setErr(null);
+    try {
+      const { paymentMethod, provider } = PAY_MODE_REQUEST[mode];
+      const res = await paymentAPI.createGroupPayment(groupId, {
+        shiftId,
+        paymentMethod,
+        provider,
+        locale: "vn",
+        clientIp: null,
+        bankCode: null,
+      });
+      const p = res.data.data;
+      setPayment(p);
+
+      if (mode === "VNPAY_QR") {
+        pollPaymentStatus(p.orderId);
+      } else if (mode === "VNPAY_ATM") {
+        const url = p.payUrl || p.qrContent;
+        if (url) {
+          sessionStorage.setItem("vnpay_order_id", String(p.orderId));
+          window.location.href = url;
+        } else {
+          setErr("Không nhận được link thanh toán từ server.");
+        }
+      }
+    } catch (e: any) {
+      setErr(e.response?.data?.message || "Lỗi tạo thanh toán nhóm");
+    } finally { setLoading(false); }
+  };
+
+  const confirmManualPayment = async () => {
+    if (!payment) return;
+    setLoading(true); setErr(null);
+    try {
+      await paymentAPI.confirmManualPayment(payment.paymentId);
+      onPaid();
+    } catch (e: any) {
+      setErr(e.response?.data?.message || "Lỗi xác nhận thanh toán");
+    } finally { setLoading(false); }
+  };
+
+  if (billErr) return <div className="form-err">{billErr}</div>;
+  if (!bill) return <div className="muted" style={{ padding: 12 }}>Đang tải hoá đơn nhóm…</div>;
+
+  return (
+    <div className="payment-form">
+      <div className="group-bill" style={{ background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: 8, padding: "10px 14px", marginBottom: 12 }}>
+        <div style={{ fontWeight: 700, marginBottom: 6 }}>
+          🍽️ Hoá đơn gộp nhóm — bàn chính {bill.masterTableCode ?? bill.masterTableId} ({bill.orders.length} bàn)
+        </div>
+        {bill.orders.map((o) => (
+          <div key={o.orderId} className="total-row" style={{ fontSize: 13 }}>
+            <span>Bàn {o.tableCode ?? o.tableId} (#{o.orderId}) · {o.status}</span>
+            <span>{fmtVnd(o.total)}</span>
+          </div>
+        ))}
+      </div>
+
+      <div className="pay-section">
+        <h4>Phương thức thanh toán</h4>
+        <div className="pay-methods">
+          <button className={`pay-method-btn ${mode === "CASH" ? "active" : ""}`} onClick={() => setMode("CASH")}>💵 Tiền mặt</button>
+          <button className={`pay-method-btn ${mode === "VNPAY_QR" ? "active" : ""}`} onClick={() => setMode("VNPAY_QR")}>📱 VNPay QR</button>
+          <button className={`pay-method-btn ${mode === "VIETQR" ? "active" : ""}`} onClick={() => setMode("VIETQR")}>🏦 Chuyển khoản VietQR</button>
+          <button className={`pay-method-btn ${mode === "VNPAY_ATM" ? "active" : ""}`} onClick={() => setMode("VNPAY_ATM")}>🏧 VNPay ATM</button>
+        </div>
+      </div>
+
+      <div className="order-totals">
+        {bill.tax > 0 && (
+          <>
+            <div className="total-row subtotal-row"><span>Tạm tính (trước thuế)</span><span>{fmtVnd(bill.subtotal)}</span></div>
+            <div className="total-row tax-row"><span>Thuế</span><span>{fmtVnd(bill.tax)}</span></div>
+          </>
+        )}
+        <div className="total-row grand-total-row"><span>Tổng cả nhóm</span><b>{fmtVnd(bill.total)}</b></div>
+      </div>
+
+      {!bill.payable && <div className="alert-error" style={{ marginBottom: 8 }}>⚠️ {bill.reason}</div>}
+      {err && <div className="form-err">{err}</div>}
+
+      {!payment ? (
+        <button className="btn-pay" onClick={createPayment} disabled={loading || !bill.payable}>
+          {loading ? "Đang xử lý..." : mode === "VNPAY_ATM" ? "🏧 Chuyển sang VNPay" : "💳 Thanh toán cả nhóm"}
+        </button>
+      ) : (
+        <div className="payment-result">
+          {(mode === "VNPAY_QR" || mode === "VIETQR") && (
+            <div className="qr-display">
+              <p className="qr-label">Khách quét mã để thanh toán {fmtVnd(payment.amount)}</p>
+              {payment.qrContent || payment.payUrl ? (
+                <div style={{ display: "flex", justifyContent: "center", margin: "12px 0" }}>
+                  <QRCodeSVG value={payment.qrContent || payment.payUrl || ""} size={210} level="M" includeMargin />
+                </div>
+              ) : (
+                <div className="qr-placeholder">Không có mã QR</div>
+              )}
+              {pollStatus && <div className="poll-status">Trạng thái: <b>{pollStatus}</b> — Đang kiểm tra mỗi 3 giây...</div>}
+            </div>
+          )}
+          {(mode === "CASH" || mode === "VIETQR") && (
+            <div className="cash-confirm">
+              <div className="cash-amount"><span>Số tiền thu</span><b>{fmtVnd(payment.amount)}</b></div>
+              <button className="btn-pay success" onClick={confirmManualPayment} disabled={loading}>
+                {loading ? "Đang xác nhận..." : "✅ Xác nhận đã thu tiền"}
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -827,7 +1011,11 @@ function InvoiceScreen({ currentShift }: InvoiceScreenProps) {
                   ⚠️ Chưa mở ca — hãy mở ca trước khi thu tiền.
                 </div>
               )}
-              <PaymentForm order={selected} shiftId={currentShift?.id ?? null} onPaid={handlePaid} />
+              {selected.tableGroupId ? (
+                <GroupPaymentForm groupId={selected.tableGroupId} shiftId={currentShift?.id ?? null} onPaid={handlePaid} />
+              ) : (
+                <PaymentForm order={selected} shiftId={currentShift?.id ?? null} onPaid={handlePaid} />
+              )}
             </>
           )}
         </div>

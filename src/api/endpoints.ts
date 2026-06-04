@@ -19,6 +19,8 @@ import {
   KitchenSlaStats,
   ExpiringLot,
   CreatePaymentRequest,
+  CreateGroupPaymentRequest,
+  GroupBillResponse,
   PaymentResponse,
   PaymentRequestResponse,
   PaymentStatusResponse,
@@ -466,6 +468,20 @@ export const paymentAPI = {
     axiosInstance.get<ApiResponse<PaymentStatusResponse>>(
       `/payments/orders/${orderId}/status`,
     ),
+  /** GET /payments/groups/{groupId}/bill — consolidated bill for a table group. */
+  getGroupBill: (groupId: number) =>
+    axiosInstance.get<ApiResponse<GroupBillResponse>>(
+      `/payments/groups/${groupId}/bill`,
+    ),
+  /** POST /payments/groups/{groupId} — settle the whole group with one payment. */
+  createGroupPayment: (groupId: number, data: CreateGroupPaymentRequest) => {
+    const key = uuidv4();
+    return axiosInstance.post<ApiResponse<PaymentResponse>>(
+      `/payments/groups/${groupId}`,
+      data,
+      { headers: { "X-Idempotency-Key": key } },
+    );
+  },
   refundPayment: (paymentId: number, data: RefundRequest) => {
     const key = uuidv4();
     return axiosInstance.post<ApiResponse<RefundResponse>>(

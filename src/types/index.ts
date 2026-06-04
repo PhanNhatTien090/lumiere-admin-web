@@ -244,6 +244,7 @@ export interface OrderItemResponse {
 export interface OrderResponse {
   id: number;
   tableId: number;
+  tableGroupId?: number | null;
   tableCode?: string;
   status: OrderStatus;
   subtotalAmount: number;
@@ -306,6 +307,48 @@ export interface PaymentStatusResponse {
   status: string;
   amount?: number;
   paidAt?: string | null;
+}
+
+// ─── Group bill (gộp bàn) ────────────────────────────────────────────────────────
+export interface GroupBillItem {
+  name: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface GroupOrderBill {
+  orderId: number;
+  tableId: number;
+  tableCode: string | null;
+  status: string | null;
+  subtotal: number;
+  tax: number;
+  total: number;
+  items: GroupBillItem[];
+}
+
+export interface GroupBillResponse {
+  groupId: number;
+  masterTableId: number;
+  masterTableCode: string | null;
+  anchorOrderId: number | null;
+  orders: GroupOrderBill[];
+  items: GroupBillItem[];
+  subtotal: number;
+  tax: number;
+  total: number;
+  payable: boolean;
+  reason: string | null;
+}
+
+export interface CreateGroupPaymentRequest {
+  shiftId: number;
+  paymentMethod: PaymentMethod;
+  provider: PaymentProvider;
+  locale?: string | null;
+  clientIp?: string | null;
+  bankCode?: string | null;
 }
 
 export interface RefundRequest {
