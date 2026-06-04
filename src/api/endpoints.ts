@@ -403,7 +403,9 @@ export const inventoryAPI = {
   importStock: (data: {
     itemId: number;
     quantity: number;
-    expiryDate: string; // yyyy-MM-dd, bắt buộc (ngày tương lai)
+    // Khai báo hạn dùng theo 1 trong 2 cách (backend ưu tiên shelfLifeDays):
+    expiryDate?: string; // yyyy-MM-dd (ngày tương lai)
+    shelfLifeDays?: number; // số ngày sử dụng kể từ hôm nay
     note?: string;
   }) =>
     axiosInstance.post<ApiResponse<IngredientResponseDto>>(
@@ -412,6 +414,7 @@ export const inventoryAPI = {
         ingredientId: data.itemId,
         quantity: data.quantity,
         expiryDate: data.expiryDate,
+        shelfLifeDays: data.shelfLifeDays,
         note: data.note,
       },
     ),

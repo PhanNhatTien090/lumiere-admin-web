@@ -181,6 +181,9 @@ function TransactionForm({
   const [itemId, setItemId] = useState(items[0]?.id ?? 0);
   const [quantity, setQuantity] = useState(1);
   const [note, setNote] = useState("");
+  // Hạn dùng nhập theo số ngày sử dụng ("days") hoặc chọn ngày trực tiếp ("date").
+  const [expiryMode, setExpiryMode] = useState<"days" | "date">("days");
+  const [shelfLifeDays, setShelfLifeDays] = useState(7);
   const [expiryDate, setExpiryDate] = useState("");
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -192,6 +195,14 @@ function TransactionForm({
     return d.toISOString().slice(0, 10);
   }, []);
 
+  // Xem trước ngày hết hạn khi nhập theo số ngày sử dụng.
+  const previewExpiry = useMemo(() => {
+    if (!(shelfLifeDays > 0)) return null;
+    const d = new Date();
+    d.setDate(d.getDate() + shelfLifeDays);
+    return d.toISOString().slice(0, 10);
+  }, [shelfLifeDays]);
+
   const submit = async () => {
     if (!itemId) {
       setErr("Chọn nguyên liệu");
@@ -202,14 +213,25 @@ function TransactionForm({
       return;
     }
     if (type === "import") {
-      if (!expiryDate) { setErr("Chọn hạn sử dụng"); return; }
-      if (expiryDate < minExpiry) { setErr("Hạn sử dụng phải sau ngày hôm nay"); return; }
+      if (expiryMode === "days") {
+        if (!(shelfLifeDays > 0)) { setErr("Số ngày sử dụng phải lớn hơn 0"); return; }
+      } else {
+        if (!expiryDate) { setErr("Chọn hạn sử dụng"); return; }
+        if (expiryDate < minExpiry) { setErr("Hạn sử dụng phải sau ngày hôm nay"); return; }
+      }
     }
     setLoading(true);
     setErr(null);
     try {
       if (type === "import") {
-        await inventoryAPI.importStock({ itemId, quantity, expiryDate, note: note || undefined });
+        await inventoryAPI.importStock({
+          itemId,
+          quantity,
+          ...(expiryMode === "days"
+            ? { shelfLifeDays }
+            : { expiryDate }),
+          note: note || undefined,
+        });
       } else {
         await inventoryAPI.exportStock({ itemId, quantity, note: note || undefined });
       }
@@ -256,12 +278,49 @@ function TransactionForm({
       {type === "import" && (
         <div className="form-group">
           <label>Hạn sử dụng *</label>
-          <input
-            type="date"
-            value={expiryDate}
-            min={minExpiry}
-            onChange={(e) => setExpiryDate(e.target.value)}
-          />
+          <div style={{ display: "flex", gap: 16, margin: "4px 0 8px" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 400, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="expiryMode"
+                checked={expiryMode === "days"}
+                onChange={() => setExpiryMode("days")}
+              />
+              Theo số ngày sử dụng
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 4, fontWeight: 400, cursor: "pointer" }}>
+              <input
+                type="radio"
+                name="expiryMode"
+                checked={expiryMode === "date"}
+                onChange={() => setExpiryMode("date")}
+              />
+              Chọn ngày hết hạn
+            </label>
+          </div>
+          {expiryMode === "days" ? (
+            <>
+              <input
+                type="number"
+                min={1}
+                value={shelfLifeDays}
+                onChange={(e) => setShelfLifeDays(+e.target.value)}
+                placeholder="VD: 7"
+              />
+              {previewExpiry && (
+                <small style={{ color: "#6b7280" }}>
+                  Hết hạn dự kiến: <strong>{previewExpiry}</strong> (hôm nay + {shelfLifeDays} ngày)
+                </small>
+              )}
+            </>
+          ) : (
+            <input
+              type="date"
+              value={expiryDate}
+              min={minExpiry}
+              onChange={(e) => setExpiryDate(e.target.value)}
+            />
+          )}
         </div>
       )}
       <div className="form-actions">
